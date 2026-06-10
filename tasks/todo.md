@@ -115,8 +115,8 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 - [x] **M6 — Polish.** Settings, model picker, error states, multi-preview. First usable daily-driver build. ✅ 2026-06-09 — **v1 complete.**
 
 ### AI chat backlog (user request, 2026-06-09 — revisit after M5)
-- [ ] **Multiple chats per document** — new-chat button; thread list/switcher per doc (schema: add a `chats` table, `chat_messages.chat_id` instead of `document_id`).
-- [ ] **Token + context visibility** — show input/output token usage per message and running context size; provider usage data comes back in stream events (`message_delta.usage` on Anthropic; `usage` on OpenRouter).
+- [x] **Multiple chats per document** — shipped 2026-06-10 (v2 roadmap #3). Migration v4 `chats` table + `chat_messages.chat_id`; lazy backfill of pre-v4 threads on first access; chat switcher dropdown + new/delete in the assistant panel; auto-title from the first user message.
+- [x] **Token + context visibility** — shipped 2026-06-10. `assistant:usage` event (Anthropic `message_start`/`message_delta` usage; OpenRouter final `usage` chunk via `stream_options.include_usage`); per-message in/out token counts persisted on `chat_messages`; running context size in the panel header.
 - [ ] **Context management / compaction** — long threads will blow up cost and context; summarize or truncate older turns (Anthropic has server-side compaction, beta `compact-2026-01-12`; OpenRouter path needs client-side strategy).
 - [ ] General hardening pass on the assistant — user expects to do "a lot" here; treat the chat as a core surface, not a bolt-on.
 
