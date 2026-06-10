@@ -183,6 +183,47 @@ fn inline_system_prompt(document_content: &str, selected_text: &str) -> String {
     )
 }
 
+/// System prompt for expanding a captured idea fragment into a full draft of
+/// the given target document type. Returns ONLY the markdown body of the draft
+/// (no preamble, no code fences) so it can be written straight into a new doc.
+fn expand_system_prompt(idea: &str, target_label: &str) -> String {
+    format!(
+        "You are a writing partner inside Plume, a desktop writing app for content \
+         creators. The user captured a rough idea and wants it expanded into a \
+         structured first draft for a {target_label}. Develop the idea into a complete, \
+         well-organized draft written in markdown: a clear angle, logical sections, and \
+         concrete substance — not filler. Match the conventions of a {target_label}. \
+         Return ONLY the markdown body of the draft: no preamble, no explanation, no \
+         surrounding code fences.\n\n\
+         The captured idea:\n---\n{idea}\n---"
+    )
+}
+
+/// Expand a captured idea into a draft of `target_label`, streaming the draft
+/// markdown over the same `assistant:*` events (filtered by stream id, so the
+/// chat panel ignores it). Uses the provider's default (strong) model — this is
+/// a generative job. Shares the single AiState slot (mutually exclusive with
+/// chat/inline edit).
+pub fn start_expand_stream(
+    app: AppHandle,
+    state: &AiState,
+    stream_id: String,
+    provider: Provider,
+    model: Option<String>,
+    idea: String,
+    target_label: String,
+) -> Result<()> {
+    let model = model
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| provider.default_model().to_string());
+    let system = expand_system_prompt(&idea, &target_label);
+    let messages = vec![ChatMessage {
+        role: "user".into(),
+        content: format!("Expand my idea into a {target_label} draft."),
+    }];
+    run_stream(app, state, stream_id, provider, model, system, messages)
+}
+
 pub fn start_stream(
     app: AppHandle,
     state: &AiState,
@@ -497,5 +538,14 @@ mod tests {
         // the replace-only instruction is what keeps the output spliceable
         assert!(prompt.contains("ONLY the replacement text"));
         assert!(prompt.contains("code fences"));
+    }
+
+    #[test]
+    fn expand_prompt_includes_idea_and_target() {
+        let prompt = expand_system_prompt("a post about local-first apps", "Newsletter");
+        assert!(prompt.contains("a post about local-first apps"));
+        assert!(prompt.contains("Newsletter"));
+        // body-only so it can be written straight into a new doc
+        assert!(prompt.contains("ONLY the markdown body"));
     }
 }

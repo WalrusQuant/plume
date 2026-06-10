@@ -17,7 +17,7 @@
 | 2 | Document snapshots / history | Low | migration v3 | — | ✅ done 2026-06-10 |
 | 3 | Multiple chats per doc + token visibility | Low-Med | migration v4 | — | ✅ done 2026-06-10 |
 | 4 | Inline AI edit (selection menu) | Medium | none | #2 strongly recommended | ✅ done 2026-06-10 (selection menu, click-driven) |
-| 5 | Idea inbox / quick capture | Medium | small migration | — |
+| 5 | Idea inbox / quick capture | Medium | none (enum variant) | — | ✅ done 2026-06-10 (click-driven Inbox, no global shortcut) |
 | 6 | Voice profile | Medium | small migration | — |
 | 7 | Cross-document memory (search + AI recall) | Med-High | FTS5 migration | — |
 | 8 | Pipeline & publishing | High | migration(s) | — |

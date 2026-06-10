@@ -17,6 +17,7 @@ pub enum DocType {
     ClaudeMd,
     SystemPrompt,
     Runbook,
+    Idea,
     Generic,
 }
 
@@ -31,6 +32,7 @@ impl DocType {
             DocType::ClaudeMd => "claude-md",
             DocType::SystemPrompt => "system-prompt",
             DocType::Runbook => "runbook",
+            DocType::Idea => "idea",
             DocType::Generic => "generic",
         }
     }
@@ -45,6 +47,7 @@ impl DocType {
             "claude-md" => Ok(DocType::ClaudeMd),
             "system-prompt" => Ok(DocType::SystemPrompt),
             "runbook" => Ok(DocType::Runbook),
+            "idea" => Ok(DocType::Idea),
             "generic" => Ok(DocType::Generic),
             other => Err(Error::InvalidInput(format!("unknown document type: {other}"))),
         }
@@ -932,6 +935,7 @@ mod tests {
             DocType::ClaudeMd,
             DocType::SystemPrompt,
             DocType::Runbook,
+            DocType::Idea,
             DocType::Generic,
         ] {
             assert_eq!(DocType::parse(t.as_str()).unwrap(), t);

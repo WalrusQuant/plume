@@ -9,6 +9,7 @@ export type DocType =
   | "claude-md"
   | "system-prompt"
   | "runbook"
+  | "idea"
   | "generic";
 
 export interface Document {
@@ -145,5 +146,13 @@ export const api = {
       selectedText,
       documentContent,
     }),
+  sendIdeaExpand: (
+    streamId: string,
+    provider: AIProvider,
+    model: string | null,
+    idea: string,
+    targetLabel: string,
+  ) =>
+    invoke<void>("send_idea_expand", { streamId, provider, model, idea, targetLabel }),
   stopAssistant: () => invoke<void>("stop_assistant"),
 };

@@ -193,3 +193,55 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 - **Editor keymap:** Mod-b/i/k/e → toggleBold/Italic/insertLink/inlineCode (Prec.high over basicSetup).
 - **Multi-preview:** Rendered | LinkedIn pills in preview pane; `render_linkedin_preview` command shows exact clipboard text.
 - Verified live by user: "everything works."
+
+---
+
+## ACTIVE — v2.1 #5: Idea Inbox (quick capture)
+
+> Click-driven only (no global OS shortcut — no-shortcuts preference). Ideas are
+> ordinary documents with a new `DocType::Idea`. A pinned "Inbox" section in the
+> sidebar captures + lists them; "Expand with AI" promotes a fragment to a draft.
+
+**Decisions:** capture UX + promote behavior confirmed with user before build;
+expand target = small type menu; expand model = provider default (strong); no
+migration (enum variant only).
+
+### Backend (Rust)
+- [ ] `storage.rs`: `DocType::Idea` (as_str/parse "idea") + roundtrip test.
+- [ ] `ai.rs`: `expand_system_prompt(idea, target_label)` + `start_expand_stream`
+      mirroring `start_inline_stream`, default (strong) model, reuses `run_stream`.
+- [ ] `commands.rs`: `send_idea_expand` wrapper; `lib.rs`: register it.
+- [ ] Test: expand prompt includes idea text + target label.
+
+### Frontend
+- [ ] `api.ts`: `"idea"` in DocType; `sendIdeaExpand(...)`.
+- [ ] `DocumentIcon.svelte`: lightbulb icon for `idea`.
+- [ ] `buildSidebarTree.ts`: exclude ideas from folderTree/unfiled.
+- [ ] `Sidebar.svelte`: pinned Inbox section — capture input + idea list with an
+      Expand action; ideas hidden from the Documents tree.
+- [ ] `ideaExpand.svelte.ts` (new): headless controller, own stream id, accumulate
+      tokens, `onComplete(text)`; shares AiState slot (mutually exclusive).
+- [ ] `+page.svelte`: `captureIdea(text)` (create idea, prepend, no switch);
+      `expandIdea(idea, type)` → stream → create+open draft; init/destroy controller.
+
+### Verify
+- [ ] `cargo test` green (+ new); `pnpm check` 0/0; live: capture → Inbox → edit →
+      Expand → draft opens; mutual exclusion with chat holds.
+
+### Review
+Implemented (awaiting live verification):
+- Backend: `DocType::Idea`; `expand_system_prompt` + `start_expand_stream`
+  (default/strong model, reuses `run_stream` + `assistant:*` events, shares the
+  single AiState slot → mutually exclusive with chat/inline); `send_idea_expand`
+  command registered. Tests: doc-type roundtrip covers Idea; expand-prompt test.
+- Frontend: `"idea"` DocType + lightbulb icon + empty template entry; ideas
+  excluded from the folder tree (`buildSidebarTree` returns `ideas[]`). Sidebar
+  pinned **Inbox** section: "+ New idea" (creates blank idea, opens it),
+  per-idea Expand menu (Blog/Newsletter/LinkedIn/X), rename/delete, spinner while
+  expanding. `ideaExpand.svelte.ts` headless controller (Promise-based, own
+  stream id). `+page.svelte`: `newIdea`, `expandIdea` (flush → read → expand →
+  create+open draft; idea KEPT per decision).
+- Decisions used: capture = "+ New idea" button; promote = keep the idea.
+- Verified: cargo test 42 green; pnpm check 0/0; pnpm build + cargo build clean.
+- Possible follow-up: auto-name an idea from its first line (today it's "New
+  idea" until renamed — same pattern as chat auto-titling).
