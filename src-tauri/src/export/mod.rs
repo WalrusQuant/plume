@@ -1,6 +1,7 @@
 pub mod docx;
 pub mod html;
 pub mod linkedin;
+pub mod x;
 
 use serde::Serialize;
 
@@ -23,6 +24,18 @@ pub const TARGETS: &[ExportTarget] = &[
         ext: None,
     },
     ExportTarget {
+        id: "x-thread",
+        label: "X thread",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "x-article",
+        label: "X article (rich)",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
         id: "html",
         label: "HTML file",
         delivery: "file",
@@ -40,6 +53,8 @@ pub const TARGETS: &[ExportTarget] = &[
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum ExportOutput {
     Clipboard { text: String },
+    /// Rich paste: `html` is the primary flavor, `plain` the fallback.
+    ClipboardHtml { html: String, plain: String },
     File { path: String },
     Cancelled,
 }

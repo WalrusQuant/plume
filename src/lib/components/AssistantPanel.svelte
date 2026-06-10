@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { assistant } from "$lib/assistant.svelte";
+  import { toast } from "$lib/toast.svelte";
 
   interface Props {
     onApply: (content: string) => void;
@@ -14,6 +15,22 @@
   let input = $state("");
   let copiedIdx = $state<number | null>(null);
   let messagesEl: HTMLDivElement | undefined = $state();
+
+  /** Fire-and-forget chat op with a visible error toast on failure. */
+  function guard(promise: Promise<unknown>, what: string) {
+    promise.catch((e) => toast.error(`${what} failed: ${e}`));
+  }
+
+  /** Context size after the last completed turn (what the model last saw). */
+  const contextTokens = $derived.by(() => {
+    for (let i = assistant.messages.length - 1; i >= 0; i--) {
+      const m = assistant.messages[i];
+      if (m.role === "assistant" && m.inputTokens != null) {
+        return m.inputTokens + (m.outputTokens ?? 0);
+      }
+    }
+    return 0;
+  });
 
   $effect(() => {
     void assistant.messages.length;
@@ -82,10 +99,33 @@
 {:else}
   <div class="assistant-panel">
     <div class="assistant-header">
-      <span class="assistant-header-title">Assistant</span>
+      <select
+        class="assistant-chat-select"
+        value={assistant.activeChatId}
+        onchange={(e) => guard(assistant.selectChat(e.currentTarget.value), "Switching chat")}
+        title="Switch chat"
+      >
+        {#each assistant.chats as chat (chat.id)}
+          <option value={chat.id}>{chat.title}</option>
+        {/each}
+      </select>
       <div class="assistant-header-actions">
-        {#if assistant.messages.length > 0}
-          <button class="assistant-header-btn" onclick={() => assistant.clear()} title="Clear chat">
+        {#if contextTokens > 0}
+          <span class="assistant-context" title="Context size after the last turn">
+            ~{contextTokens.toLocaleString()} tok
+          </span>
+        {/if}
+        <button class="assistant-header-btn" onclick={() => guard(assistant.newChat(), "New chat")} title="New chat">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        {#if assistant.chats.length > 1}
+          <button
+            class="assistant-header-btn"
+            onclick={() => guard(assistant.deleteChat(assistant.activeChatId!), "Delete chat")}
+            title="Delete this chat"
+          >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
             </svg>
@@ -109,6 +149,9 @@
       {#each assistant.messages as msg, i (i)}
         <div class="assistant-msg assistant-msg--{msg.role}">
           <div class="assistant-msg-content">{msg.content}</div>
+          {#if msg.role === "assistant" && msg.inputTokens != null}
+            <div class="assistant-msg-usage">{msg.inputTokens} in · {msg.outputTokens} out</div>
+          {/if}
           {#if msg.role === "assistant" && !assistant.isStreaming}
             {@const block = extractBlock(msg.content)}
             <div class="assistant-msg-actions">

@@ -31,9 +31,28 @@ export interface Folder {
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** Token usage, present on assistant messages once a stream completes. */
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export interface Chat {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AIProvider = "anthropic" | "openrouter";
+
+export type SnapshotCause = "ai-edit" | "interval" | "manual" | "restore";
+
+export interface SnapshotMeta {
+  id: string;
+  cause: SnapshotCause;
+  wordCount: number;
+  createdAt: string;
+}
 
 export interface ExportTarget {
   id: string;
@@ -44,6 +63,7 @@ export interface ExportTarget {
 
 export type ExportOutput =
   | { type: "clipboard"; text: string }
+  | { type: "clipboardHtml"; html: string; plain: string }
   | { type: "file"; path: string }
   | { type: "cancelled" };
 
@@ -64,6 +84,8 @@ export const api = {
   renderPreview: (content: string) => invoke<string>("render_preview", { content }),
   renderLinkedinPreview: (content: string) =>
     invoke<string>("render_linkedin_preview", { content }),
+  renderXThreadPreview: (content: string) =>
+    invoke<string>("render_x_thread_preview", { content }),
 
   listFolders: () => invoke<Folder[]>("list_folders"),
   createFolder: (name: string) => invoke<Folder>("create_folder", { name }),
@@ -75,10 +97,23 @@ export const api = {
   exportDocument: (content: string, docName: string, targetId: string) =>
     invoke<ExportOutput>("export_document", { content, docName, targetId }),
 
-  getChatMessages: (documentId: string) =>
-    invoke<ChatMessage[]>("get_chat_messages", { documentId }),
-  saveChatMessages: (documentId: string, messages: ChatMessage[]) =>
-    invoke<void>("save_chat_messages", { documentId, messages }),
+  listChats: (documentId: string) => invoke<Chat[]>("list_chats", { documentId }),
+  createChat: (documentId: string, title?: string) =>
+    invoke<Chat>("create_chat", { documentId, title }),
+  renameChat: (chatId: string, title: string) =>
+    invoke<Chat>("rename_chat", { chatId, title }),
+  deleteChat: (chatId: string) => invoke<void>("delete_chat", { chatId }),
+  getChatMessages: (chatId: string) =>
+    invoke<ChatMessage[]>("get_chat_messages", { chatId }),
+  saveChatMessages: (chatId: string, messages: ChatMessage[]) =>
+    invoke<void>("save_chat_messages", { chatId, messages }),
+
+  createSnapshot: (documentId: string, content: string, cause: SnapshotCause) =>
+    invoke<SnapshotMeta | null>("create_snapshot", { documentId, content, cause }),
+  listSnapshots: (documentId: string) =>
+    invoke<SnapshotMeta[]>("list_snapshots", { documentId }),
+  getSnapshotContent: (snapshotId: string) =>
+    invoke<string>("get_snapshot_content", { snapshotId }),
 
   setApiKey: (provider: AIProvider, key: string) =>
     invoke<void>("set_api_key", { provider, key }),
