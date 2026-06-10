@@ -46,6 +46,15 @@ impl Provider {
             Provider::Openrouter => "anthropic/claude-opus-4.8",
         }
     }
+
+    /// Cheaper/faster model for short, scoped jobs like inline edits.
+    /// Verified 2026-06-10 (claude-api skill / OpenRouter catalog).
+    fn fast_model(self) -> &'static str {
+        match self {
+            Provider::Anthropic => "claude-haiku-4-5",
+            Provider::Openrouter => "anthropic/claude-haiku-4.5",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +168,21 @@ fn system_prompt(document_content: &str) -> String {
     )
 }
 
+/// System prompt for an inline edit: the model is editing a selected fragment
+/// of the document and must return ONLY the replacement text — no preamble, no
+/// code fences — so the result can be spliced straight back into the editor.
+fn inline_system_prompt(document_content: &str, selected_text: &str) -> String {
+    format!(
+        "You are editing a fragment of a markdown document inside Markdown, a desktop \
+         writing app. Apply the user's instruction to the selected text and return ONLY \
+         the replacement text. Do not add any preamble, explanation, quotes, or code \
+         fences — output only the edited fragment, ready to paste in place. Match the \
+         surrounding markdown style and keep the user's voice.\n\n\
+         Full document (for context):\n---\n{document_content}\n---\n\n\
+         Selected text to edit:\n---\n{selected_text}\n---"
+    )
+}
+
 pub fn start_stream(
     app: AppHandle,
     state: &AiState,
@@ -168,12 +192,51 @@ pub fn start_stream(
     messages: Vec<ChatMessage>,
     document_content: String,
 ) -> Result<()> {
-    let Some(api_key) = get_api_key(&app, provider)? else {
-        return Err(Error::InvalidInput("no API key configured".into()));
-    };
     let model = model
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.default_model().to_string());
+    let system = system_prompt(&document_content);
+    run_stream(app, state, stream_id, provider, model, system, messages)
+}
+
+/// Start an inline edit: apply `instruction` to `selected_text`, streaming the
+/// replacement back over the same `assistant:*` events (the frontend filters by
+/// stream id, so the chat panel ignores it). Defaults to the provider's faster
+/// model. Shares the single AiState slot — starting this aborts any chat stream
+/// and vice versa.
+pub fn start_inline_stream(
+    app: AppHandle,
+    state: &AiState,
+    stream_id: String,
+    provider: Provider,
+    model: Option<String>,
+    instruction: String,
+    selected_text: String,
+    document_content: String,
+) -> Result<()> {
+    let model = model
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| provider.fast_model().to_string());
+    let system = inline_system_prompt(&document_content, &selected_text);
+    let messages = vec![ChatMessage { role: "user".into(), content: instruction }];
+    run_stream(app, state, stream_id, provider, model, system, messages)
+}
+
+/// Shared driver: load the key, abort any in-flight stream, then spawn the
+/// provider request as the new in-flight task. `system` is the fully-built
+/// system prompt (chat or inline); `model` is already resolved.
+fn run_stream(
+    app: AppHandle,
+    state: &AiState,
+    stream_id: String,
+    provider: Provider,
+    model: String,
+    system: String,
+    messages: Vec<ChatMessage>,
+) -> Result<()> {
+    let Some(api_key) = get_api_key(&app, provider)? else {
+        return Err(Error::InvalidInput("no API key configured".into()));
+    };
 
     let mut current = state.current.lock().expect("ai mutex poisoned");
     if let Some((old_id, handle)) = current.take() {
@@ -185,12 +248,10 @@ pub fn start_stream(
     let task = tauri::async_runtime::spawn(async move {
         let result = match provider {
             Provider::Anthropic => {
-                stream_anthropic(&task_app, &task_id, &api_key, &model, messages, &document_content)
-                    .await
+                stream_anthropic(&task_app, &task_id, &api_key, &model, messages, &system).await
             }
             Provider::Openrouter => {
-                stream_openrouter(&task_app, &task_id, &api_key, &model, messages, &document_content)
-                    .await
+                stream_openrouter(&task_app, &task_id, &api_key, &model, messages, &system).await
             }
         };
         if let Err(e) = result {
@@ -321,12 +382,12 @@ async fn stream_anthropic(
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
-    document_content: &str,
+    system: &str,
 ) -> Result<()> {
     let body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
-        "system": system_prompt(document_content),
+        "system": system,
         "messages": messages,
         "thinking": {"type": "adaptive"},
         "stream": true,
@@ -370,11 +431,11 @@ async fn stream_openrouter(
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
-    document_content: &str,
+    system: &str,
 ) -> Result<()> {
     let mut all_messages = vec![json!({
         "role": "system",
-        "content": system_prompt(document_content),
+        "content": system,
     })];
     all_messages.extend(messages.iter().map(|m| json!({"role": m.role, "content": m.content})));
 
@@ -409,4 +470,32 @@ async fn stream_openrouter(
             .map_or(Chunk::None, |t| Chunk::Token(t.into())))
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fast_model_is_haiku_tier() {
+        assert_eq!(Provider::Anthropic.fast_model(), "claude-haiku-4-5");
+        assert_eq!(Provider::Openrouter.fast_model(), "anthropic/claude-haiku-4.5");
+    }
+
+    #[test]
+    fn fast_model_differs_from_default() {
+        for provider in [Provider::Anthropic, Provider::Openrouter] {
+            assert_ne!(provider.fast_model(), provider.default_model());
+        }
+    }
+
+    #[test]
+    fn inline_prompt_includes_selection_and_replace_only_rule() {
+        let prompt = inline_system_prompt("# Doc\n\nbody text", "body text");
+        assert!(prompt.contains("body text"));
+        assert!(prompt.contains("# Doc"));
+        // the replace-only instruction is what keeps the output spliceable
+        assert!(prompt.contains("ONLY the replacement text"));
+        assert!(prompt.contains("code fences"));
+    }
 }

@@ -7,6 +7,7 @@
   import { languages } from "@codemirror/language-data";
   import { themeExtensions, type Theme } from "$lib/editor/themes";
   import { toggleBold, toggleItalic, insertLink, toggleInlineCode } from "$lib/editor/formatting";
+  import { inlineEditExtension } from "$lib/inlineEdit.svelte";
 
   const formattingKeymap = Prec.high(
     keymap.of([
@@ -39,6 +40,7 @@
       extensions: [
         basicSetup,
         formattingKeymap,
+        inlineEditExtension,
         EditorView.lineWrapping,
         themeComp.of(themeExtensions(theme)),
         markdown({ codeLanguages: languages }),
