@@ -209,6 +209,7 @@ const templates: Record<DocType, string> = {
   "claude-md": claudeMdTemplate,
   "system-prompt": systemPromptTemplate,
   runbook: runbookTemplate,
+  idea: "",
   generic: "",
 };
 

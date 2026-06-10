@@ -284,6 +284,19 @@ pub fn send_inline_edit(
 }
 
 #[tauri::command]
+pub fn send_idea_expand(
+    app: AppHandle,
+    state: State<AiState>,
+    stream_id: String,
+    provider: Provider,
+    model: Option<String>,
+    idea: String,
+    target_label: String,
+) -> Result<()> {
+    ai::start_expand_stream(app, &state, stream_id, provider, model, idea, target_label)
+}
+
+#[tauri::command]
 pub fn stop_assistant(app: AppHandle, state: State<AiState>) {
     ai::stop_stream(&app, &state)
 }
