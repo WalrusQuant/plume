@@ -73,6 +73,49 @@ pub struct Folder {
     pub updated_at: String,
 }
 
+/// Why a document snapshot was captured. Stored as its kebab-case string;
+/// validated here, mirroring `DocType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SnapshotCause {
+    AiEdit,
+    Interval,
+    Manual,
+    Restore,
+}
+
+impl SnapshotCause {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SnapshotCause::AiEdit => "ai-edit",
+            SnapshotCause::Interval => "interval",
+            SnapshotCause::Manual => "manual",
+            SnapshotCause::Restore => "restore",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self> {
+        match s {
+            "ai-edit" => Ok(SnapshotCause::AiEdit),
+            "interval" => Ok(SnapshotCause::Interval),
+            "manual" => Ok(SnapshotCause::Manual),
+            "restore" => Ok(SnapshotCause::Restore),
+            other => Err(Error::InvalidInput(format!("unknown snapshot cause: {other}"))),
+        }
+    }
+}
+
+/// Snapshot metadata for the history list — content is fetched separately so
+/// the list stays cheap even with large documents.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotMeta {
+    pub id: String,
+    pub cause: SnapshotCause,
+    pub word_count: usize,
+    pub created_at: String,
+}
+
 /// Schema migrations, applied in order; `PRAGMA user_version` tracks progress.
 /// Append-only: never edit an entry that has shipped.
 const MIGRATIONS: &[&str] = &[
@@ -102,6 +145,16 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL
     );
     CREATE INDEX idx_chat_messages_doc ON chat_messages(document_id);",
+    // v3 — document version snapshots (history / restore points)
+    "CREATE TABLE snapshots (
+        id TEXT PRIMARY KEY NOT NULL,
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        content TEXT NOT NULL,
+        cause TEXT NOT NULL,
+        word_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_snapshots_doc ON snapshots(document_id, created_at DESC);",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -293,6 +346,91 @@ pub fn save_chat_messages(
     }
     tx.commit()?;
     Ok(())
+}
+
+/// Keep at most this many snapshots per document (most recent kept).
+const MAX_SNAPSHOTS_PER_DOC: usize = 50;
+
+fn word_count(content: &str) -> usize {
+    content.split_whitespace().count()
+}
+
+/// Capture a version of a document. Returns `None` (no-op) when the content is
+/// identical to the document's most recent snapshot, so periodic saves don't
+/// pile up duplicates. Prunes to the most recent `MAX_SNAPSHOTS_PER_DOC`.
+pub fn create_snapshot(
+    conn: &Connection,
+    document_id: &str,
+    content: &str,
+    cause: SnapshotCause,
+) -> Result<Option<SnapshotMeta>> {
+    let exists: Option<i64> = conn
+        .query_row("SELECT 1 FROM documents WHERE id = ?1", [document_id], |r| r.get(0))
+        .optional()?;
+    if exists.is_none() {
+        return Err(Error::NotFound("document"));
+    }
+
+    let latest: Option<String> = conn
+        .query_row(
+            "SELECT content FROM snapshots WHERE document_id = ?1
+             ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            [document_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if latest.as_deref() == Some(content) {
+        return Ok(None);
+    }
+
+    let id = uuid::Uuid::new_v4().to_string();
+    let ts = now();
+    let wc = word_count(content);
+    conn.execute(
+        "INSERT INTO snapshots (id, document_id, content, cause, word_count, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, document_id, content, cause.as_str(), wc as i64, ts],
+    )?;
+    prune_snapshots(conn, document_id)?;
+    Ok(Some(SnapshotMeta { id, cause, word_count: wc, created_at: ts }))
+}
+
+fn prune_snapshots(conn: &Connection, document_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM snapshots
+         WHERE document_id = ?1
+           AND id NOT IN (
+             SELECT id FROM snapshots WHERE document_id = ?1
+             ORDER BY created_at DESC, rowid DESC LIMIT ?2
+           )",
+        rusqlite::params![document_id, MAX_SNAPSHOTS_PER_DOC as i64],
+    )?;
+    Ok(())
+}
+
+pub fn list_snapshots(conn: &Connection, document_id: &str) -> Result<Vec<SnapshotMeta>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, cause, word_count, created_at FROM snapshots
+         WHERE document_id = ?1 ORDER BY created_at DESC, rowid DESC",
+    )?;
+    let rows = stmt
+        .query_map([document_id], |row| {
+            let cause: String = row.get(1)?;
+            Ok(SnapshotMeta {
+                id: row.get(0)?,
+                cause: SnapshotCause::parse(&cause).unwrap_or(SnapshotCause::Manual),
+                word_count: row.get::<_, i64>(2)? as usize,
+                created_at: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+pub fn get_snapshot_content(conn: &Connection, snapshot_id: &str) -> Result<String> {
+    conn.query_row("SELECT content FROM snapshots WHERE id = ?1", [snapshot_id], |r| r.get(0))
+        .optional()?
+        .ok_or(Error::NotFound("snapshot"))
 }
 
 fn folder_from_row(row: &Row) -> rusqlite::Result<Folder> {
@@ -506,6 +644,79 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get(0))
             .unwrap();
         assert_eq!(orphans, 0);
+    }
+
+    #[test]
+    fn snapshots_capture_list_and_fetch() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, Some("v1")).unwrap();
+
+        let s1 = create_snapshot(&conn, &doc.id, "v1", SnapshotCause::Manual).unwrap();
+        assert!(s1.is_some());
+        // identical content to the latest snapshot is a no-op
+        assert!(create_snapshot(&conn, &doc.id, "v1", SnapshotCause::Interval)
+            .unwrap()
+            .is_none());
+
+        let s2 = create_snapshot(&conn, &doc.id, "v2 two words", SnapshotCause::Interval)
+            .unwrap()
+            .unwrap();
+        assert_eq!(s2.word_count, 3);
+
+        let list = list_snapshots(&conn, &doc.id).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].id, s2.id); // most recent first
+        assert_eq!(list[0].cause, SnapshotCause::Interval);
+        assert_eq!(get_snapshot_content(&conn, &s2.id).unwrap(), "v2 two words");
+    }
+
+    #[test]
+    fn snapshots_cascade_on_document_delete() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, None).unwrap();
+        create_snapshot(&conn, &doc.id, "x", SnapshotCause::Manual).unwrap();
+        delete_document(&conn, &doc.id).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn snapshots_pruned_to_cap() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, None).unwrap();
+        for i in 0..(MAX_SNAPSHOTS_PER_DOC + 10) {
+            create_snapshot(&conn, &doc.id, &format!("content {i}"), SnapshotCause::Interval)
+                .unwrap();
+        }
+        assert_eq!(list_snapshots(&conn, &doc.id).unwrap().len(), MAX_SNAPSHOTS_PER_DOC);
+    }
+
+    #[test]
+    fn snapshot_on_missing_document_fails() {
+        let conn = test_conn();
+        assert!(matches!(
+            create_snapshot(&conn, "nope", "x", SnapshotCause::Manual).unwrap_err(),
+            Error::NotFound("document")
+        ));
+        assert!(matches!(
+            get_snapshot_content(&conn, "nope").unwrap_err(),
+            Error::NotFound("snapshot")
+        ));
+    }
+
+    #[test]
+    fn snapshot_cause_serde_roundtrip() {
+        for c in [
+            SnapshotCause::AiEdit,
+            SnapshotCause::Interval,
+            SnapshotCause::Manual,
+            SnapshotCause::Restore,
+        ] {
+            assert_eq!(SnapshotCause::parse(c.as_str()).unwrap(), c);
+            assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{}\"", c.as_str()));
+        }
     }
 
     #[test]

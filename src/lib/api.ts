@@ -35,6 +35,15 @@ export interface ChatMessage {
 
 export type AIProvider = "anthropic" | "openrouter";
 
+export type SnapshotCause = "ai-edit" | "interval" | "manual" | "restore";
+
+export interface SnapshotMeta {
+  id: string;
+  cause: SnapshotCause;
+  wordCount: number;
+  createdAt: string;
+}
+
 export interface ExportTarget {
   id: string;
   label: string;
@@ -82,6 +91,13 @@ export const api = {
     invoke<ChatMessage[]>("get_chat_messages", { documentId }),
   saveChatMessages: (documentId: string, messages: ChatMessage[]) =>
     invoke<void>("save_chat_messages", { documentId, messages }),
+
+  createSnapshot: (documentId: string, content: string, cause: SnapshotCause) =>
+    invoke<SnapshotMeta | null>("create_snapshot", { documentId, content, cause }),
+  listSnapshots: (documentId: string) =>
+    invoke<SnapshotMeta[]>("list_snapshots", { documentId }),
+  getSnapshotContent: (snapshotId: string) =>
+    invoke<string>("get_snapshot_content", { snapshotId }),
 
   setApiKey: (provider: AIProvider, key: string) =>
     invoke<void>("set_api_key", { provider, key }),

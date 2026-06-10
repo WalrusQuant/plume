@@ -182,6 +182,26 @@ pub fn save_chat_messages(
 }
 
 #[tauri::command]
+pub fn create_snapshot(
+    db: State<Db>,
+    document_id: String,
+    content: String,
+    cause: storage::SnapshotCause,
+) -> Result<Option<storage::SnapshotMeta>> {
+    db.with(|conn| storage::create_snapshot(conn, &document_id, &content, cause))
+}
+
+#[tauri::command]
+pub fn list_snapshots(db: State<Db>, document_id: String) -> Result<Vec<storage::SnapshotMeta>> {
+    db.with(|conn| storage::list_snapshots(conn, &document_id))
+}
+
+#[tauri::command]
+pub fn get_snapshot_content(db: State<Db>, snapshot_id: String) -> Result<String> {
+    db.with(|conn| storage::get_snapshot_content(conn, &snapshot_id))
+}
+
+#[tauri::command]
 pub fn set_api_key(app: AppHandle, provider: Provider, key: String) -> Result<()> {
     ai::set_api_key(&app, provider, &key)
 }
