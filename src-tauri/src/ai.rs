@@ -242,6 +242,39 @@ async fn error_for_status(response: reqwest::Response, provider: &str) -> Result
     Err(Error::InvalidInput(format!("{provider} API error {status}: {detail}")))
 }
 
+/// Send a provider request and emit a token event per SSE payload. `extract`
+/// is the only provider-specific part: pull the text delta out of an event
+/// (Ok(None) to skip it) or return the provider's in-stream error.
+async fn stream_sse(
+    app: &AppHandle,
+    stream_id: &str,
+    provider_label: &str,
+    request: reqwest::RequestBuilder,
+    extract: impl Fn(&serde_json::Value) -> Result<Option<String>>,
+) -> Result<()> {
+    let response = request
+        .send()
+        .await
+        .map_err(|e| Error::InvalidInput(format!("request failed: {e}")))?;
+    let response = error_for_status(response, provider_label).await?;
+
+    for_each_sse_data(response, |data| {
+        if data == "[DONE]" {
+            return Ok(());
+        }
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
+            return Ok(());
+        };
+        if let Some(text) = extract(&event)? {
+            if !text.is_empty() {
+                let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+
 async fn stream_anthropic(
     app: &AppHandle,
     stream_id: &str,
@@ -258,37 +291,22 @@ async fn stream_anthropic(
         "thinking": {"type": "adaptive"},
         "stream": true,
     });
-
-    let response = reqwest::Client::new()
+    let request = reqwest::Client::new()
         .post(ANTHROPIC_URL)
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| Error::InvalidInput(format!("request failed: {e}")))?;
-    let response = error_for_status(response, "Anthropic").await?;
+        .json(&body);
 
-    for_each_sse_data(response, |data| {
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
-            return Ok(());
-        };
-        match event["type"].as_str() {
-            Some("content_block_delta") => {
-                if event["delta"]["type"] == "text_delta" {
-                    if let Some(text) = event["delta"]["text"].as_str() {
-                        let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
-                    }
-                }
-            }
-            Some("error") => {
-                let msg = event["error"]["message"].as_str().unwrap_or("stream error");
-                return Err(Error::InvalidInput(msg.to_string()));
-            }
-            _ => {}
+    stream_sse(app, stream_id, "Anthropic", request, |event| match event["type"].as_str() {
+        Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
+            Ok(event["delta"]["text"].as_str().map(String::from))
         }
-        Ok(())
+        Some("error") => {
+            let msg = event["error"]["message"].as_str().unwrap_or("stream error");
+            Err(Error::InvalidInput(msg.to_string()))
+        }
+        _ => Ok(None),
     })
     .await
 }
@@ -312,35 +330,19 @@ async fn stream_openrouter(
         "messages": all_messages,
         "stream": true,
     });
-
-    let response = reqwest::Client::new()
+    let request = reqwest::Client::new()
         .post(OPENROUTER_URL)
         .header("authorization", format!("Bearer {api_key}"))
         .header("content-type", "application/json")
         .header("http-referer", "https://github.com/adamwickwire/markdown")
         .header("x-title", "Markdown")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| Error::InvalidInput(format!("request failed: {e}")))?;
-    let response = error_for_status(response, "OpenRouter").await?;
+        .json(&body);
 
-    for_each_sse_data(response, |data| {
-        if data == "[DONE]" {
-            return Ok(());
-        }
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
-            return Ok(());
-        };
+    stream_sse(app, stream_id, "OpenRouter", request, |event| {
         if let Some(msg) = event["error"]["message"].as_str() {
             return Err(Error::InvalidInput(msg.to_string()));
         }
-        if let Some(text) = event["choices"][0]["delta"]["content"].as_str() {
-            if !text.is_empty() {
-                let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
-            }
-        }
-        Ok(())
+        Ok(event["choices"][0]["delta"]["content"].as_str().map(String::from))
     })
     .await
 }

@@ -25,7 +25,9 @@
   let documents = $state<Document[]>([]);
   let folders = $state<Folder[]>([]);
   let selectedDocId = $state<string | null>(null);
-  let initialContent = $state("");
+  /** Live text of the selected doc. Seeds the editor on remount ({#key});
+      after that the editor owns the text and reports changes back here. */
+  let content = $state("");
   let loading = $state(true);
 
   let theme = $state<Theme>("dark");
@@ -45,7 +47,6 @@
   let previewHtml = $state("");
   let wordCount = $state(0);
   let rightTab = $state<RightPaneTab>("preview");
-  let currentContent = "";
   let exportTargets = $state<import("$lib/api").ExportTarget[]>([]);
   let exportStatus = $state("");
   let exportStatusTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,7 +106,7 @@
 
   function setPreviewMode(mode: "rendered" | "linkedin") {
     previewMode = mode;
-    run(updatePreview(currentContent), "Preview");
+    run(updatePreview(content), "Preview");
   }
 
   function countWords(content: string): number {
@@ -113,11 +114,11 @@
     return words ? words.length : 0;
   }
 
-  function onContentChange(content: string) {
-    currentContent = content;
-    if (selectedDocId) scheduleSave(selectedDocId, content);
-    schedulePreview(content);
-    wordCount = countWords(content);
+  function onContentChange(next: string) {
+    content = next;
+    if (selectedDocId) scheduleSave(selectedDocId, next);
+    schedulePreview(next);
+    wordCount = countWords(next);
   }
 
   function applyAssistantContent(content: string) {
@@ -132,7 +133,7 @@
     if (!selectedDoc) return;
     await flushSave();
     try {
-      const result = await api.exportDocument(currentContent, selectedDoc.name, targetId);
+      const result = await api.exportDocument(content, selectedDoc.name, targetId);
       if (result.type === "clipboard") {
         await navigator.clipboard.writeText(result.text);
         showExportStatus("Copied to clipboard — ready to paste");
@@ -165,11 +166,10 @@
     if (id === selectedDocId) return;
     await flushSave();
     editorView = null;
-    initialContent = await api.getDocumentContent(id);
+    content = await api.getDocumentContent(id);
     selectedDocId = id;
-    currentContent = initialContent;
-    schedulePreview(initialContent);
-    wordCount = countWords(initialContent);
+    schedulePreview(content);
+    wordCount = countWords(content);
     void assistant.loadFor(id);
   }
 
@@ -304,7 +304,7 @@
         <div class="editor-pane">
           {#key selectedDoc.id}
             <Editor
-              content={initialContent}
+              {content}
               {theme}
               {onContentChange}
               onEditorReady={(view) => (editorView = view)}
@@ -338,7 +338,7 @@
             <AssistantPanel
               onApply={applyAssistantContent}
               onInsert={insertAssistantContent}
-              getDocumentContent={() => currentContent}
+              getDocumentContent={() => content}
               onOpenSettings={() => (settingsOpen = true)}
             />
           {/if}
