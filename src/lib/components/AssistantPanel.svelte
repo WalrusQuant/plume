@@ -1,39 +1,19 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { api, type AIProvider } from "$lib/api";
-  import { assistant, DEFAULT_MODELS } from "$lib/assistant.svelte";
+  import { assistant } from "$lib/assistant.svelte";
 
   interface Props {
     onApply: (content: string) => void;
     onInsert: (content: string) => void;
     getDocumentContent: () => string;
+    onOpenSettings: () => void;
   }
 
-  let { onApply, onInsert, getDocumentContent }: Props = $props();
+  let { onApply, onInsert, getDocumentContent, onOpenSettings }: Props = $props();
 
   let input = $state("");
   let copiedIdx = $state<number | null>(null);
-  let editingKey = $state(false);
-  let keyInput = $state("");
-  let keyError = $state("");
   let messagesEl: HTMLDivElement | undefined = $state();
-
-  let formProvider = $state<AIProvider>(assistant.settings.provider);
-  let formModel = $state(assistant.settings.model);
-  let hasSavedKey = $state(false);
-
-  // keep "key already saved?" in sync with the provider selected in the form
-  $effect(() => {
-    const provider = formProvider;
-    void api.hasApiKey(provider).then((has) => {
-      if (provider === formProvider) hasSavedKey = has;
-    });
-  });
-
-  function onProviderChange(provider: AIProvider) {
-    formProvider = provider;
-    formModel = DEFAULT_MODELS[provider];
-  }
 
   $effect(() => {
     void assistant.messages.length;
@@ -53,26 +33,6 @@
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
-    }
-  }
-
-  async function saveKey(e: Event) {
-    e.preventDefault();
-    keyError = "";
-    try {
-      await assistant.updateSettings({ provider: formProvider, model: formModel.trim() });
-      if (keyInput.trim()) {
-        await assistant.saveKey(keyInput.trim());
-      }
-      if (!assistant.isConfigured) {
-        keyError = "Enter an API key for this provider to continue.";
-        return;
-      }
-      keyInput = "";
-      hasSavedKey = true;
-      editingKey = false;
-    } catch (err) {
-      keyError = String(err);
     }
   }
 
@@ -100,7 +60,7 @@
   }
 </script>
 
-{#if !assistant.isConfigured || editingKey}
+{#if !assistant.isConfigured}
   <div class="assistant-empty">
     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
       <path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5" />
@@ -110,64 +70,14 @@
       <path d="M11 17v.01" />
       <path d="M7 14v.01" />
     </svg>
-    <p>{assistant.isConfigured ? "AI settings" : "Set up an AI provider to get started"}</p>
-    <form class="assistant-key-form" onsubmit={saveKey}>
-      <div class="assistant-provider-row">
-        <button
-          type="button"
-          class="dialog-type-card {formProvider === 'anthropic' ? 'dialog-type-card--active' : ''}"
-          onclick={() => onProviderChange("anthropic")}
-        >
-          <span class="dialog-type-label">Anthropic</span>
-        </button>
-        <button
-          type="button"
-          class="dialog-type-card {formProvider === 'openrouter' ? 'dialog-type-card--active' : ''}"
-          onclick={() => onProviderChange("openrouter")}
-        >
-          <span class="dialog-type-label">OpenRouter</span>
-        </button>
-      </div>
-      <input
-        class="dialog-input"
-        type="text"
-        placeholder="Model, e.g. {DEFAULT_MODELS[formProvider]}"
-        bind:value={formModel}
-        autocomplete="off"
-      />
-      <input
-        class="dialog-input"
-        type="password"
-        placeholder={hasSavedKey
-          ? "Key saved — leave blank to keep it"
-          : formProvider === "anthropic"
-            ? "sk-ant-..."
-            : "sk-or-..."}
-        bind:value={keyInput}
-        autocomplete="off"
-      />
-      <p class="assistant-key-status">
-        {hasSavedKey
-          ? "✓ A key is saved for this provider. You only need to fill this in to replace it."
-          : "No key saved for this provider yet."}
-      </p>
-      <div class="assistant-key-actions">
-        {#if editingKey}
-          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => (editingKey = false)}>
-            Cancel
-          </button>
-        {/if}
-        <button type="submit" class="dialog-btn dialog-btn--primary">Save</button>
-      </div>
-      {#if keyError}
-        <p class="assistant-key-error">{keyError}</p>
-      {/if}
-    </form>
-    <p class="assistant-key-note">
-      {import.meta.env.DEV
-        ? "Dev build: key is stored in a local file in the app data folder (keychain is skipped to avoid password prompts)."
-        : "Stored in the macOS Keychain — never leaves this machine except to call your AI provider."}
-    </p>
+    <p>Set up an AI provider to get started</p>
+    <button class="assistant-settings-btn" onclick={onOpenSettings}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+      </svg>
+      Settings
+    </button>
   </div>
 {:else}
   <div class="assistant-panel">
@@ -181,7 +91,7 @@
             </svg>
           </button>
         {/if}
-        <button class="assistant-header-btn" onclick={() => (editingKey = true)} title="API key settings">
+        <button class="assistant-header-btn" onclick={onOpenSettings} title="AI settings">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
