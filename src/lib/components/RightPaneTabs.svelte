@@ -1,5 +1,5 @@
 <script lang="ts">
-  export type RightPaneTab = "preview" | "assistant";
+  export type RightPaneTab = "preview" | "assistant" | "history";
 
   interface Props {
     activeTab: RightPaneTab;
@@ -21,5 +21,11 @@
     onclick={() => onTabChange("assistant")}
   >
     Assistant
+  </button>
+  <button
+    class="right-pane-tab {activeTab === 'history' ? 'right-pane-tab--active' : ''}"
+    onclick={() => onTabChange("history")}
+  >
+    History
   </button>
 </div>

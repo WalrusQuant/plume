@@ -14,7 +14,7 @@
 | # | Feature | Complexity | Schema change | Depends on |
 |---|---------|-----------|---------------|------------|
 | 1 | X thread + X Article export | Low | none | — | ✅ done 2026-06-10 |
-| 2 | Document snapshots / history | Low | migration v3 | — |
+| 2 | Document snapshots / history | Low | migration v3 | — | ✅ done 2026-06-10 |
 | 3 | Multiple chats per doc + token visibility | Low-Med | migration v4 | — |
 | 4 | Inline AI edit (selection menu) | Medium | none | #2 strongly recommended |
 | 5 | Idea inbox / quick capture | Medium | small migration | — |
