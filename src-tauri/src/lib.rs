@@ -55,6 +55,7 @@ pub fn run() {
             commands::has_api_key,
             commands::delete_api_key,
             commands::send_assistant_message,
+            commands::send_inline_edit,
             commands::stop_assistant,
         ])
         .run(tauri::generate_context!())

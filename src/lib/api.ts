@@ -127,5 +127,21 @@ export const api = {
     documentContent: string,
   ) =>
     invoke<void>("send_assistant_message", { streamId, provider, model, messages, documentContent }),
+  sendInlineEdit: (
+    streamId: string,
+    provider: AIProvider,
+    model: string | null,
+    instruction: string,
+    selectedText: string,
+    documentContent: string,
+  ) =>
+    invoke<void>("send_inline_edit", {
+      streamId,
+      provider,
+      model,
+      instruction,
+      selectedText,
+      documentContent,
+    }),
   stopAssistant: () => invoke<void>("stop_assistant"),
 };

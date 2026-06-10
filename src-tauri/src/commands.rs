@@ -254,6 +254,30 @@ pub fn send_assistant_message(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn send_inline_edit(
+    app: AppHandle,
+    state: State<AiState>,
+    stream_id: String,
+    provider: Provider,
+    model: Option<String>,
+    instruction: String,
+    selected_text: String,
+    document_content: String,
+) -> Result<()> {
+    ai::start_inline_stream(
+        app,
+        &state,
+        stream_id,
+        provider,
+        model,
+        instruction,
+        selected_text,
+        document_content,
+    )
+}
+
+#[tauri::command]
 pub fn stop_assistant(app: AppHandle, state: State<AiState>) {
     ai::stop_stream(&app, &state)
 }

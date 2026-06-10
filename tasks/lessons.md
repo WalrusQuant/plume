@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-06-10 — Don't gate features behind keyboard shortcuts; make them visible
+- **Mistake:** Shipped inline AI edit behind a hidden `Mod-J` shortcut (plus `Mod-Enter`/`Esc`). User selected text, "nothing happened," asked "where is this Mod-J," then: "I hate all these short keys."
+- **Rule:** This user dislikes keyboard shortcuts and undiscoverable affordances. Default to **visible, click-driven UI**: trigger on an obvious user action (e.g. show a selection menu when text is selected) and make every action a button. A shortcut is at most an unadvertised convenience (Esc to cancel), never the only way in. When a plan proposes a keybinding as the entry point, push back or add a visible affordance.
+
 ## 2026-06-10 — Verify shutdown claims against the harness, not just `ps`
 - **Mistake:** Told the user "nothing is running" while a background watcher shell (an `until` loop whose exit condition had become impossible after I killed the app) was still alive. My `ps` grep surfaced it as `/bin/zsh -c` and I dismissed it as my own command.
 - **Rule:** Before claiming all background work is stopped: (1) stop every background task ID I started via TaskStop, not just pkill by name; (2) any `until`-loop watcher must be explicitly stopped when the thing it waits for is killed — its condition may never become true; (3) never hand-wave an unexplained process as "probably mine."
