@@ -1,4 +1,4 @@
-# Markdown
+# Plume
 
 **Write once, publish everywhere.** A local-first desktop markdown writing
 app with an AI writing partner that exports your work — adapted per platform —
