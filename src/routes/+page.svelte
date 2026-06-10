@@ -25,7 +25,9 @@
   let documents = $state<Document[]>([]);
   let folders = $state<Folder[]>([]);
   let selectedDocId = $state<string | null>(null);
-  let initialContent = $state("");
+  /** Live text of the selected doc. Seeds the editor on remount ({#key});
+      after that the editor owns the text and reports changes back here. */
+  let content = $state("");
   let loading = $state(true);
 
   let theme = $state<Theme>("dark");
@@ -45,7 +47,6 @@
   let previewHtml = $state("");
   let wordCount = $state(0);
   let rightTab = $state<RightPaneTab>("preview");
-  let currentContent = "";
   let exportTargets = $state<import("$lib/api").ExportTarget[]>([]);
   let exportStatus = $state("");
   let exportStatusTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,12 +56,12 @@
   // ----- persistence (debounced save) -----
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingContent: string | null = null;
-  let savingDocId: string | null = null;
+  /** Unsaved content per document. Failed saves stay here until they land,
+      so switching documents (and typing there) can't clobber them. */
+  const pendingSaves = new Map<string, string>();
 
   function scheduleSave(docId: string, content: string) {
-    savingDocId = docId;
-    pendingContent = content;
+    pendingSaves.set(docId, content);
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
   }
@@ -70,16 +71,16 @@
       clearTimeout(saveTimer);
       saveTimer = null;
     }
-    if (savingDocId && pendingContent !== null) {
-      const id = savingDocId;
-      const content = pendingContent;
-      pendingContent = null;
+    for (const [id, content] of [...pendingSaves]) {
+      pendingSaves.delete(id);
       try {
         await api.saveDocumentContent(id, content);
       } catch (e) {
-        pendingContent = content; // keep it; the next keystroke or flush retries
+        // keep it for the next keystroke/flush to retry — unless newer
+        // content for this doc was scheduled while the save was in flight
+        if (!pendingSaves.has(id)) pendingSaves.set(id, content);
         toast.error(`Saving failed: ${e}`);
-        return;
+        continue;
       }
       const doc = documents.find((d) => d.id === id);
       if (doc) doc.updatedAt = new Date().toISOString();
@@ -105,7 +106,7 @@
 
   function setPreviewMode(mode: "rendered" | "linkedin") {
     previewMode = mode;
-    run(updatePreview(currentContent), "Preview");
+    run(updatePreview(content), "Preview");
   }
 
   function countWords(content: string): number {
@@ -113,11 +114,11 @@
     return words ? words.length : 0;
   }
 
-  function onContentChange(content: string) {
-    currentContent = content;
-    if (selectedDocId) scheduleSave(selectedDocId, content);
-    schedulePreview(content);
-    wordCount = countWords(content);
+  function onContentChange(next: string) {
+    content = next;
+    if (selectedDocId) scheduleSave(selectedDocId, next);
+    schedulePreview(next);
+    wordCount = countWords(next);
   }
 
   function applyAssistantContent(content: string) {
@@ -132,7 +133,7 @@
     if (!selectedDoc) return;
     await flushSave();
     try {
-      const result = await api.exportDocument(currentContent, selectedDoc.name, targetId);
+      const result = await api.exportDocument(content, selectedDoc.name, targetId);
       if (result.type === "clipboard") {
         await navigator.clipboard.writeText(result.text);
         showExportStatus("Copied to clipboard — ready to paste");
@@ -165,11 +166,10 @@
     if (id === selectedDocId) return;
     await flushSave();
     editorView = null;
-    initialContent = await api.getDocumentContent(id);
+    content = await api.getDocumentContent(id);
     selectedDocId = id;
-    currentContent = initialContent;
-    schedulePreview(initialContent);
-    wordCount = countWords(initialContent);
+    schedulePreview(content);
+    wordCount = countWords(content);
     void assistant.loadFor(id);
   }
 
@@ -191,11 +191,9 @@
 
   async function deleteDocument(id: string) {
     await api.deleteDocument(id);
+    pendingSaves.delete(id); // never retry a save against a deleted row
     documents = documents.filter((d) => d.id !== id);
     if (selectedDocId === id) {
-      // discard any pending save for the deleted doc
-      pendingContent = null;
-      savingDocId = null;
       selectedDocId = null;
       if (documents.length > 0) {
         await selectDocument(documents[0].id);
@@ -219,6 +217,8 @@
   async function deleteFolder(id: string) {
     await api.deleteFolder(id);
     folders = folders.filter((f) => f.id !== id);
+    // mirror the backend FK (ON DELETE SET NULL): its docs become unfiled
+    documents = documents.map((d) => (d.folderId === id ? { ...d, folderId: null } : d));
   }
 
   // ----- theme -----
@@ -304,7 +304,7 @@
         <div class="editor-pane">
           {#key selectedDoc.id}
             <Editor
-              content={initialContent}
+              {content}
               {theme}
               {onContentChange}
               onEditorReady={(view) => (editorView = view)}
@@ -338,7 +338,7 @@
             <AssistantPanel
               onApply={applyAssistantContent}
               onInsert={insertAssistantContent}
-              getDocumentContent={() => currentContent}
+              getDocumentContent={() => content}
               onOpenSettings={() => (settingsOpen = true)}
             />
           {/if}

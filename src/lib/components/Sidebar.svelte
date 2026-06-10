@@ -111,8 +111,7 @@
         ? `Delete folder "${folder.name}"? ${docsInFolder.length} document(s) will be moved to unfiled.`
         : `Delete folder "${folder.name}"?`;
     if (await confirm(msg, { kind: "warning" })) {
-      // backend FK is ON DELETE SET NULL, but move explicitly so the UI list updates
-      docsInFolder.forEach((d) => onMoveDocument(d.id, null));
+      // backend FK is ON DELETE SET NULL; the page updates the doc list to match
       onDeleteFolder(folder.id);
     }
   }

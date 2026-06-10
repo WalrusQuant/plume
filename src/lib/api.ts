@@ -85,10 +85,12 @@ export const api = {
   hasApiKey: (provider: AIProvider) => invoke<boolean>("has_api_key", { provider }),
   deleteApiKey: (provider: AIProvider) => invoke<void>("delete_api_key", { provider }),
   sendAssistantMessage: (
+    streamId: string,
     provider: AIProvider,
     model: string | null,
     messages: ChatMessage[],
     documentContent: string,
-  ) => invoke<void>("send_assistant_message", { provider, model, messages, documentContent }),
+  ) =>
+    invoke<void>("send_assistant_message", { streamId, provider, model, messages, documentContent }),
   stopAssistant: () => invoke<void>("stop_assistant"),
 };

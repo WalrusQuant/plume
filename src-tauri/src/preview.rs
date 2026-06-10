@@ -43,6 +43,17 @@ mod tests {
     }
 
     #[test]
+    fn frontmatter_survives_indented_dashes_in_block_scalars() {
+        // a block scalar's lines are indented, so an inner "---" must not
+        // terminate the frontmatter (a flush-left "---" legitimately does —
+        // that's YAML's document separator)
+        let html = render_html("---\ndescription: |\n  ---\n  use dashes\nname: x\n---\n\n# Body");
+        assert!(!html.contains("name: x"));
+        assert!(!html.contains("use dashes"));
+        assert!(html.contains("<h1>Body</h1>"));
+    }
+
+    #[test]
     fn escapes_raw_html() {
         let html = render_html("<script>alert(1)</script>");
         assert!(!html.contains("<script>"));
