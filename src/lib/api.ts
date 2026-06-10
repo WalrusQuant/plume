@@ -86,6 +86,8 @@ export const api = {
     invoke<string>("render_linkedin_preview", { content }),
   renderXThreadPreview: (content: string) =>
     invoke<string>("render_x_thread_preview", { content }),
+  renderXArticlePreview: (content: string) =>
+    invoke<string>("render_x_article_preview", { content }),
 
   listFolders: () => invoke<Folder[]>("list_folders"),
   createFolder: (name: string) => invoke<Folder>("create_folder", { name }),

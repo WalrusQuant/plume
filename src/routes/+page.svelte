@@ -39,10 +39,11 @@
   let sidebarCollapsed = $state(false);
   let dialogOpen = $state(false);
   let settingsOpen = $state(false);
-  type PreviewMode = "rendered" | "linkedin" | "x-thread";
+  type PreviewMode = "rendered" | "linkedin" | "x-thread" | "x-article";
   let previewMode = $state<PreviewMode>("rendered");
   let linkedinText = $state("");
   let xThreadText = $state("");
+  let xArticleHtml = $state("");
 
   /** Fire-and-forget with a visible error toast on failure. */
   function run(promise: Promise<unknown>, what: string) {
@@ -126,6 +127,8 @@
       linkedinText = await api.renderLinkedinPreview(content);
     } else if (previewMode === "x-thread") {
       xThreadText = await api.renderXThreadPreview(content);
+    } else if (previewMode === "x-article") {
+      xArticleHtml = await api.renderXArticlePreview(content);
     } else {
       previewHtml = await api.renderPreview(content);
     }
@@ -391,29 +394,23 @@
           <RightPaneTabs activeTab={rightTab} onTabChange={changeRightTab} />
           {#if rightTab === "preview"}
             <div class="preview-mode-row">
-              <button
-                class="preview-mode-btn {previewMode === 'rendered' ? 'preview-mode-btn--active' : ''}"
-                onclick={() => setPreviewMode("rendered")}
+              <select
+                class="preview-mode-select"
+                value={previewMode}
+                onchange={(e) => setPreviewMode(e.currentTarget.value as PreviewMode)}
               >
-                Rendered
-              </button>
-              <button
-                class="preview-mode-btn {previewMode === 'linkedin' ? 'preview-mode-btn--active' : ''}"
-                onclick={() => setPreviewMode("linkedin")}
-              >
-                LinkedIn
-              </button>
-              <button
-                class="preview-mode-btn {previewMode === 'x-thread' ? 'preview-mode-btn--active' : ''}"
-                onclick={() => setPreviewMode("x-thread")}
-              >
-                X thread
-              </button>
+                <option value="rendered">Rendered</option>
+                <option value="linkedin">LinkedIn</option>
+                <option value="x-thread">X thread</option>
+                <option value="x-article">X Article</option>
+              </select>
             </div>
             {#if previewMode === "linkedin"}
               <pre class="linkedin-preview">{linkedinText}</pre>
             {:else if previewMode === "x-thread"}
               <pre class="linkedin-preview">{xThreadText}</pre>
+            {:else if previewMode === "x-article"}
+              <Preview htmlContent={xArticleHtml} />
             {:else}
               <Preview htmlContent={previewHtml} />
             {/if}
