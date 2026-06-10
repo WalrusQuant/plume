@@ -18,6 +18,7 @@
   import Toasts from "$lib/components/Toasts.svelte";
   import { assistant } from "$lib/assistant.svelte";
   import { inlineEdit } from "$lib/inlineEdit.svelte";
+  import { ideaExpand } from "$lib/ideaExpand.svelte";
   import { toast } from "$lib/toast.svelte";
   import type { SnapshotMeta } from "$lib/api";
 
@@ -97,6 +98,11 @@
       }
       const doc = documents.find((d) => d.id === id);
       if (doc) doc.updatedAt = new Date().toISOString();
+      // an idea is titled by its first line (notes-app style) — keep in sync
+      if (doc && doc.type === "idea") {
+        const name = deriveIdeaName(content);
+        if (name !== doc.name) run(renameDocument(id, name), "Rename idea");
+      }
       maybeIntervalSnapshot(id, content);
     }
   }
@@ -249,10 +255,51 @@
     if (rightTab === "history") void loadSnapshots();
   }
 
-  async function createDocument(name: string, type: DocType) {
-    const doc = await api.createDocument(name, type, getTemplate(type) || undefined);
+  async function createDocument(name: string, type: DocType, content?: string) {
+    const body = content ?? (getTemplate(type) || undefined);
+    const doc = await api.createDocument(name, type, body);
     documents = [doc, ...documents];
     await selectDocument(doc.id);
+  }
+
+  // ----- idea inbox -----
+
+  /** Id of the idea currently being expanded — drives the sidebar spinner. */
+  let expandingId = $state<string | null>(null);
+
+  /** An idea's title is its first non-empty line (markdown heading marks
+      stripped); empty → "New idea". */
+  function deriveIdeaName(content: string): string {
+    const firstLine = content.split("\n").find((l) => l.trim()) ?? "";
+    const cleaned = firstLine.replace(/^#+\s*/, "").trim();
+    if (!cleaned) return "New idea";
+    return cleaned.length > 40 ? `${cleaned.slice(0, 40)}…` : cleaned;
+  }
+
+  /** "+ New idea": create a blank idea and open it for immediate capture. */
+  function newIdea() {
+    run(createDocument("New idea", "idea"), "New idea");
+  }
+
+  /** Expand an idea into a full draft of `type`, then open the draft. The idea
+      itself is kept in the Inbox. */
+  async function expandIdea(ideaId: string, type: DocType, label: string) {
+    const idea = documents.find((d) => d.id === ideaId);
+    // flush so a just-typed idea (still in the debounce window) is read in full
+    await flushSave();
+    const ideaText = await api.getDocumentContent(ideaId);
+    if (!ideaText.trim()) {
+      toast.error("Add some text to the idea before expanding it.");
+      return;
+    }
+    expandingId = ideaId;
+    try {
+      const draft = await ideaExpand.expand(ideaText, label);
+      const name = idea && idea.name !== "New idea" ? `${idea.name} — ${label}` : `${label} draft`;
+      await createDocument(name, type, draft);
+    } finally {
+      expandingId = null;
+    }
   }
 
   async function renameDocument(id: string, name: string) {
@@ -312,6 +359,7 @@
     applyTheme(stored === "light" || stored === "dark" ? stored : "dark");
     void assistant.init();
     void inlineEdit.init();
+    void ideaExpand.init();
 
     (async () => {
       try {
@@ -336,6 +384,7 @@
       void flushSave();
       assistant.destroy();
       inlineEdit.destroy();
+      ideaExpand.destroy();
     };
   });
 </script>
@@ -345,8 +394,11 @@
     {documents}
     {folders}
     {selectedDocId}
+    {expandingId}
     onSelect={(id) => run(selectDocument(id), "Opening document")}
     onNewDocument={() => (dialogOpen = true)}
+    onNewIdea={newIdea}
+    onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
     onRename={(id, name) => run(renameDocument(id, name), "Rename")}
     onDelete={(id) => run(deleteDocument(id), "Delete")}
     onMoveDocument={(id, folderId) => run(moveDocument(id, folderId), "Move")}

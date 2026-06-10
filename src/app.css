@@ -442,6 +442,85 @@ button:focus-visible {
   color: var(--danger);
 }
 
+/* Inbox (ideas) */
+.sidebar-inbox {
+  flex-shrink: 0;
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: 2px 6px 6px;
+  scrollbar-width: thin;
+  border-bottom: 1px solid var(--sidebar-border);
+}
+
+.sidebar-inbox-empty {
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border: 1px dashed var(--sidebar-border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--sidebar-muted);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.sidebar-inbox-empty:hover {
+  border-color: var(--accent);
+  color: var(--sidebar-text);
+}
+
+.sidebar-idea-spinner {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+.sidebar-expand-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 4px 24px;
+  padding: 4px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius-md);
+  background: var(--sidebar-surface);
+}
+
+.sidebar-expand-menu-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--sidebar-muted);
+  padding: 2px 6px;
+}
+
+.sidebar-expand-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--sidebar-text);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.sidebar-expand-menu-item:hover {
+  background: var(--sidebar-hover);
+  color: var(--accent);
+}
+
 .sidebar-rename-input {
   width: 100%;
   padding: 4px 8px;
@@ -840,8 +919,11 @@ button:focus-visible {
    --------------------------------------------------------- */
 
 .markdown-preview {
+  /* width:100% stops the flex-column parent (.preview-pane) from shrink-wrapping
+     this to its widest line; max-width keeps a readable measure, left-aligned */
+  width: 100%;
   max-width: 720px;
-  margin: 0 auto;
+  margin: 0;
   padding: 32px 40px 48px;
   color: var(--preview-text);
   font-family: var(--font-sans);

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { confirm } from "@tauri-apps/plugin-dialog";
-  import type { Document, Folder } from "$lib/api";
+  import type { DocType, Document, Folder } from "$lib/api";
   import { buildSidebarTree } from "$lib/buildSidebarTree";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
   import MoveToFolderMenu from "$lib/components/MoveToFolderMenu.svelte";
@@ -9,8 +9,11 @@
     documents: Document[];
     folders: Folder[];
     selectedDocId: string | null;
+    expandingId: string | null;
     onSelect: (id: string) => void;
     onNewDocument: () => void;
+    onNewIdea: () => void;
+    onExpandIdea: (id: string, type: DocType, label: string) => void;
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
     onMoveDocument: (id: string, folderId: string | null) => void;
@@ -23,8 +26,11 @@
     documents,
     folders,
     selectedDocId,
+    expandingId,
     onSelect,
     onNewDocument,
+    onNewIdea,
+    onExpandIdea,
     onRename,
     onDelete,
     onMoveDocument,
@@ -32,6 +38,15 @@
     onRenameFolder,
     onDeleteFolder,
   }: Props = $props();
+
+  /** Doc types an idea can be expanded into (label passed to the AI prompt). */
+  const EXPAND_TARGETS: { type: DocType; label: string }[] = [
+    { type: "blog-post", label: "Blog Post" },
+    { type: "newsletter", label: "Newsletter" },
+    { type: "linkedin-post", label: "LinkedIn Post" },
+    { type: "x-thread", label: "X Thread" },
+  ];
+  let expandMenuId = $state<string | null>(null);
 
   let editingId = $state<string | null>(null);
   let editName = $state("");
@@ -187,6 +202,72 @@
   </div>
 {/snippet}
 
+{#snippet ideaItem(doc: Document)}
+  <div
+    class="sidebar-item {doc.id === selectedDocId ? 'sidebar-item--active' : ''}"
+    onclick={() => onSelect(doc.id)}
+    onkeydown={(e) => e.key === "Enter" && onSelect(doc.id)}
+    role="button"
+    tabindex="0"
+  >
+    <div class="sidebar-item-icon">
+      <DocumentIcon type={doc.type} size={16} />
+    </div>
+    <div class="sidebar-item-info">
+      <!-- an idea is titled by its first line; rename by editing the text -->
+      <span class="sidebar-item-name">{doc.name}</span>
+      <span class="sidebar-item-date">{formatDate(doc.updatedAt)}</span>
+    </div>
+    {#if expandingId === doc.id}
+      <div class="sidebar-idea-spinner" title="Expanding…"></div>
+    {:else}
+      <div class="sidebar-item-actions">
+          <button
+            class="sidebar-action-btn"
+            onclick={(e) => {
+              e.stopPropagation();
+              expandMenuId = expandMenuId === doc.id ? null : doc.id;
+            }}
+            title="Expand with AI"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z" />
+            </svg>
+          </button>
+          <button
+            class="sidebar-action-btn sidebar-action-btn--delete"
+            onclick={(e) => {
+              e.stopPropagation();
+              void handleDelete(doc.id, doc.name);
+            }}
+            title="Delete"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+            </svg>
+          </button>
+        </div>
+      {/if}
+  </div>
+  {#if expandMenuId === doc.id}
+    <div class="sidebar-expand-menu">
+      <span class="sidebar-expand-menu-label">Expand into…</span>
+      {#each EXPAND_TARGETS as target (target.type)}
+        <button
+          class="sidebar-expand-menu-item"
+          onclick={() => {
+            expandMenuId = null;
+            onExpandIdea(doc.id, target.type, target.label);
+          }}
+        >
+          <DocumentIcon type={target.type} size={14} />
+          {target.label}
+        </button>
+      {/each}
+    </div>
+  {/if}
+{/snippet}
+
 <aside class="sidebar">
   <div class="sidebar-brand">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -195,6 +276,28 @@
     </svg>
     <span class="sidebar-brand-text">Plume</span>
   </div>
+
+  <div class="sidebar-section-header">
+    <span class="sidebar-section-label">Inbox</span>
+    <div class="sidebar-section-actions">
+      <button class="sidebar-new-btn" onclick={onNewIdea} title="New idea">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
+    </div>
+  </div>
+  <nav class="sidebar-inbox">
+    {#each tree.ideas as idea (idea.id)}
+      {@render ideaItem(idea)}
+    {/each}
+    {#if tree.ideas.length === 0}
+      <button class="sidebar-inbox-empty" onclick={onNewIdea}>
+        Capture a quick idea…
+      </button>
+    {/if}
+  </nav>
 
   <div class="sidebar-section-header">
     <span class="sidebar-section-label">Documents</span>
