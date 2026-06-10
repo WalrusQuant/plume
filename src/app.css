@@ -1632,6 +1632,35 @@ button:focus-visible {
   font-family: var(--font-sans);
 }
 
+.assistant-chat-select {
+  flex: 1;
+  min-width: 0;
+  margin-right: 8px;
+  padding: 3px 6px;
+  background: var(--preview-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--sidebar-text);
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.assistant-context {
+  font-size: 11px;
+  color: var(--sidebar-muted);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  align-self: center;
+}
+
+.assistant-msg-usage {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--sidebar-muted);
+  font-family: var(--font-sans);
+}
+
 .assistant-header-actions {
   display: flex;
   gap: 4px;

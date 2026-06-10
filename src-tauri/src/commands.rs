@@ -168,17 +168,41 @@ async fn save_to_file(
 }
 
 #[tauri::command]
-pub fn get_chat_messages(db: State<Db>, document_id: String) -> Result<Vec<storage::StoredChatMessage>> {
-    db.with(|conn| storage::get_chat_messages(conn, &document_id))
+pub fn list_chats(db: State<Db>, document_id: String) -> Result<Vec<storage::Chat>> {
+    db.with(|conn| storage::list_chats(conn, &document_id))
+}
+
+#[tauri::command]
+pub fn create_chat(
+    db: State<Db>,
+    document_id: String,
+    title: Option<String>,
+) -> Result<storage::Chat> {
+    db.with(|conn| storage::create_chat(conn, &document_id, title.as_deref()))
+}
+
+#[tauri::command]
+pub fn rename_chat(db: State<Db>, chat_id: String, title: String) -> Result<storage::Chat> {
+    db.with(|conn| storage::rename_chat(conn, &chat_id, &title))
+}
+
+#[tauri::command]
+pub fn delete_chat(db: State<Db>, chat_id: String) -> Result<()> {
+    db.with(|conn| storage::delete_chat(conn, &chat_id))
+}
+
+#[tauri::command]
+pub fn get_chat_messages(db: State<Db>, chat_id: String) -> Result<Vec<storage::StoredChatMessage>> {
+    db.with(|conn| storage::get_chat_messages(conn, &chat_id))
 }
 
 #[tauri::command]
 pub fn save_chat_messages(
     db: State<Db>,
-    document_id: String,
+    chat_id: String,
     messages: Vec<storage::StoredChatMessage>,
 ) -> Result<()> {
-    db.with_mut(|conn| storage::save_chat_messages(conn, &document_id, &messages))
+    db.with_mut(|conn| storage::save_chat_messages(conn, &chat_id, &messages))
 }
 
 #[tauri::command]

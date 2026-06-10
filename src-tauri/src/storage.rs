@@ -116,6 +116,20 @@ pub struct SnapshotMeta {
     pub created_at: String,
 }
 
+/// An AI chat thread within a document.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Chat {
+    pub id: String,
+    pub title: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Default title for a freshly created chat (matched on the frontend to know
+/// when to auto-title from the first user message).
+pub const DEFAULT_CHAT_TITLE: &str = "New chat";
+
 /// Schema migrations, applied in order; `PRAGMA user_version` tracks progress.
 /// Append-only: never edit an entry that has shipped.
 const MIGRATIONS: &[&str] = &[
@@ -155,6 +169,19 @@ const MIGRATIONS: &[&str] = &[
         created_at TEXT NOT NULL
     );
     CREATE INDEX idx_snapshots_doc ON snapshots(document_id, created_at DESC);",
+    // v4 — multiple chat threads per document + per-message token usage
+    "CREATE TABLE chats (
+        id TEXT PRIMARY KEY NOT NULL,
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        title TEXT NOT NULL DEFAULT 'New chat',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_chats_doc ON chats(document_id, updated_at DESC);
+    ALTER TABLE chat_messages ADD COLUMN chat_id TEXT REFERENCES chats(id) ON DELETE CASCADE;
+    ALTER TABLE chat_messages ADD COLUMN input_tokens INTEGER;
+    ALTER TABLE chat_messages ADD COLUMN output_tokens INTEGER;
+    CREATE INDEX idx_chat_messages_chat ON chat_messages(chat_id);",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -306,44 +333,156 @@ pub fn save_document_content(conn: &Connection, id: &str, content: &str) -> Resu
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StoredChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<i64>,
 }
 
-pub fn get_chat_messages(conn: &Connection, document_id: &str) -> Result<Vec<StoredChatMessage>> {
+fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
+    Ok(Chat {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        created_at: row.get(2)?,
+        updated_at: row.get(3)?,
+    })
+}
+
+const CHAT_COLUMNS: &str = "id, title, created_at, updated_at";
+
+pub fn create_chat(conn: &Connection, document_id: &str, title: Option<&str>) -> Result<Chat> {
+    let exists: Option<i64> = conn
+        .query_row("SELECT 1 FROM documents WHERE id = ?1", [document_id], |r| r.get(0))
+        .optional()?;
+    if exists.is_none() {
+        return Err(Error::NotFound("document"));
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let ts = now();
+    let title = title
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or(DEFAULT_CHAT_TITLE);
+    conn.execute(
+        "INSERT INTO chats (id, document_id, title, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
+        rusqlite::params![id, document_id, title, ts],
+    )?;
+    conn.query_row(
+        &format!("SELECT {CHAT_COLUMNS} FROM chats WHERE id = ?1"),
+        [&id],
+        chat_from_row,
+    )
+    .map_err(Into::into)
+}
+
+pub fn list_chats(conn: &Connection, document_id: &str) -> Result<Vec<Chat>> {
+    // Lazy migration: messages saved before v4 have chat_id IS NULL. Wrap any
+    // such legacy thread for this document into one chat on first access.
+    let orphans: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM chat_messages WHERE document_id = ?1 AND chat_id IS NULL",
+        [document_id],
+        |r| r.get(0),
+    )?;
+    if orphans > 0 {
+        let chat = create_chat(conn, document_id, Some("Chat"))?;
+        conn.execute(
+            "UPDATE chat_messages SET chat_id = ?1 WHERE document_id = ?2 AND chat_id IS NULL",
+            rusqlite::params![chat.id, document_id],
+        )?;
+    }
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHAT_COLUMNS} FROM chats WHERE document_id = ?1 ORDER BY updated_at DESC, rowid DESC"
+    ))?;
+    let chats = stmt
+        .query_map([document_id], chat_from_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(chats)
+}
+
+pub fn rename_chat(conn: &Connection, chat_id: &str, title: &str) -> Result<Chat> {
+    let title = validated_name(title)?;
+    let changed = conn.execute(
+        "UPDATE chats SET title = ?2, updated_at = ?3 WHERE id = ?1",
+        rusqlite::params![chat_id, title, now()],
+    )?;
+    if changed == 0 {
+        return Err(Error::NotFound("chat"));
+    }
+    conn.query_row(
+        &format!("SELECT {CHAT_COLUMNS} FROM chats WHERE id = ?1"),
+        [chat_id],
+        chat_from_row,
+    )
+    .map_err(Into::into)
+}
+
+pub fn delete_chat(conn: &Connection, chat_id: &str) -> Result<()> {
+    let changed = conn.execute("DELETE FROM chats WHERE id = ?1", [chat_id])?;
+    if changed == 0 {
+        return Err(Error::NotFound("chat"));
+    }
+    Ok(())
+}
+
+pub fn get_chat_messages(conn: &Connection, chat_id: &str) -> Result<Vec<StoredChatMessage>> {
     let mut stmt = conn.prepare(
-        "SELECT role, content FROM chat_messages WHERE document_id = ?1 ORDER BY id",
+        "SELECT role, content, input_tokens, output_tokens FROM chat_messages
+         WHERE chat_id = ?1 ORDER BY id",
     )?;
     let messages = stmt
-        .query_map([document_id], |row| {
+        .query_map([chat_id], |row| {
             Ok(StoredChatMessage {
                 role: row.get(0)?,
                 content: row.get(1)?,
+                input_tokens: row.get(2)?,
+                output_tokens: row.get(3)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(messages)
 }
 
-/// Replace the whole thread for a document (simple + handles clear).
+/// Replace the whole thread for a chat (simple + handles clear). Bumps the
+/// chat's `updated_at` so active chats sort to the top of the list.
 pub fn save_chat_messages(
     conn: &mut Connection,
-    document_id: &str,
+    chat_id: &str,
     messages: &[StoredChatMessage],
 ) -> Result<()> {
+    // chat_messages.document_id is NOT NULL (v2 schema); derive it from the chat.
+    let document_id: Option<String> = conn
+        .query_row("SELECT document_id FROM chats WHERE id = ?1", [chat_id], |r| r.get(0))
+        .optional()?;
+    let Some(document_id) = document_id else {
+        return Err(Error::NotFound("chat"));
+    };
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM chat_messages WHERE document_id = ?1", [document_id])?;
+    tx.execute("DELETE FROM chat_messages WHERE chat_id = ?1", [chat_id])?;
+    let ts = now();
     {
-        let ts = now();
         let mut stmt = tx.prepare(
-            "INSERT INTO chat_messages (document_id, role, content, created_at)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO chat_messages
+                (document_id, chat_id, role, content, input_tokens, output_tokens, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
         for msg in messages {
-            stmt.execute(rusqlite::params![document_id, msg.role, msg.content, ts])?;
+            stmt.execute(rusqlite::params![
+                document_id,
+                chat_id,
+                msg.role,
+                msg.content,
+                msg.input_tokens,
+                msg.output_tokens,
+                ts
+            ])?;
         }
     }
+    tx.execute("UPDATE chats SET updated_at = ?2 WHERE id = ?1", rusqlite::params![chat_id, ts])?;
     tx.commit()?;
     Ok(())
 }
@@ -618,32 +757,95 @@ mod tests {
         ));
     }
 
+    fn msg(role: &str, content: &str) -> StoredChatMessage {
+        StoredChatMessage {
+            role: role.into(),
+            content: content.into(),
+            input_tokens: None,
+            output_tokens: None,
+        }
+    }
+
     #[test]
     fn chat_messages_roundtrip_and_cascade() {
         let mut conn = test_conn();
         let doc = create_document(&conn, "Draft", None, None).unwrap();
+        let chat = create_chat(&conn, &doc.id, None).unwrap();
+        assert_eq!(chat.title, DEFAULT_CHAT_TITLE);
 
         let thread = vec![
-            StoredChatMessage { role: "user".into(), content: "hi".into() },
-            StoredChatMessage { role: "assistant".into(), content: "hello".into() },
+            msg("user", "hi"),
+            StoredChatMessage {
+                role: "assistant".into(),
+                content: "hello".into(),
+                input_tokens: Some(120),
+                output_tokens: Some(8),
+            },
         ];
-        save_chat_messages(&mut conn, &doc.id, &thread).unwrap();
-        let loaded = get_chat_messages(&conn, &doc.id).unwrap();
+        save_chat_messages(&mut conn, &chat.id, &thread).unwrap();
+        let loaded = get_chat_messages(&conn, &chat.id).unwrap();
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].role, "user");
         assert_eq!(loaded[1].content, "hello");
+        assert_eq!(loaded[1].output_tokens, Some(8));
 
         // replace-all semantics (clear)
-        save_chat_messages(&mut conn, &doc.id, &[]).unwrap();
-        assert!(get_chat_messages(&conn, &doc.id).unwrap().is_empty());
+        save_chat_messages(&mut conn, &chat.id, &[]).unwrap();
+        assert!(get_chat_messages(&conn, &chat.id).unwrap().is_empty());
 
-        // deleting the document cascades its chat
-        save_chat_messages(&mut conn, &doc.id, &thread).unwrap();
+        // deleting the document cascades its chats and their messages
+        save_chat_messages(&mut conn, &chat.id, &thread).unwrap();
         delete_document(&conn, &doc.id).unwrap();
-        let orphans: i64 = conn
+        let msgs: i64 = conn
             .query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(orphans, 0);
+        let chats: i64 = conn.query_row("SELECT COUNT(*) FROM chats", [], |r| r.get(0)).unwrap();
+        assert_eq!(msgs, 0);
+        assert_eq!(chats, 0);
+    }
+
+    #[test]
+    fn chat_crud_and_ordering() {
+        let mut conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, None).unwrap();
+
+        let a = create_chat(&conn, &doc.id, Some("First")).unwrap();
+        let b = create_chat(&conn, &doc.id, None).unwrap();
+        assert_eq!(list_chats(&conn, &doc.id).unwrap().len(), 2);
+
+        // saving messages to `a` bumps its updated_at → sorts to the top
+        save_chat_messages(&mut conn, &a.id, &[msg("user", "hi")]).unwrap();
+        let chats = list_chats(&conn, &doc.id).unwrap();
+        assert_eq!(chats[0].id, a.id);
+
+        let renamed = rename_chat(&conn, &b.id, "  Renamed  ").unwrap();
+        assert_eq!(renamed.title, "Renamed");
+
+        delete_chat(&conn, &b.id).unwrap();
+        assert_eq!(list_chats(&conn, &doc.id).unwrap().len(), 1);
+        assert!(matches!(delete_chat(&conn, "nope").unwrap_err(), Error::NotFound("chat")));
+    }
+
+    #[test]
+    fn legacy_messages_are_backfilled_into_a_chat() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, None).unwrap();
+        // simulate a pre-v4 thread: messages with no chat_id
+        conn.execute(
+            "INSERT INTO chat_messages (document_id, role, content, created_at)
+             VALUES (?1, 'user', 'old question', ?2)",
+            rusqlite::params![doc.id, now()],
+        )
+        .unwrap();
+
+        let chats = list_chats(&conn, &doc.id).unwrap();
+        assert_eq!(chats.len(), 1);
+        let msgs = get_chat_messages(&conn, &chats[0].id).unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].content, "old question");
+
+        // idempotent — a second list doesn't create another chat
+        assert_eq!(list_chats(&conn, &doc.id).unwrap().len(), 1);
     }
 
     #[test]

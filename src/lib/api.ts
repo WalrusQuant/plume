@@ -31,6 +31,16 @@ export interface Folder {
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** Token usage, present on assistant messages once a stream completes. */
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export interface Chat {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type AIProvider = "anthropic" | "openrouter";
@@ -87,10 +97,16 @@ export const api = {
   exportDocument: (content: string, docName: string, targetId: string) =>
     invoke<ExportOutput>("export_document", { content, docName, targetId }),
 
-  getChatMessages: (documentId: string) =>
-    invoke<ChatMessage[]>("get_chat_messages", { documentId }),
-  saveChatMessages: (documentId: string, messages: ChatMessage[]) =>
-    invoke<void>("save_chat_messages", { documentId, messages }),
+  listChats: (documentId: string) => invoke<Chat[]>("list_chats", { documentId }),
+  createChat: (documentId: string, title?: string) =>
+    invoke<Chat>("create_chat", { documentId, title }),
+  renameChat: (chatId: string, title: string) =>
+    invoke<Chat>("rename_chat", { chatId, title }),
+  deleteChat: (chatId: string) => invoke<void>("delete_chat", { chatId }),
+  getChatMessages: (chatId: string) =>
+    invoke<ChatMessage[]>("get_chat_messages", { chatId }),
+  saveChatMessages: (chatId: string, messages: ChatMessage[]) =>
+    invoke<void>("save_chat_messages", { chatId, messages }),
 
   createSnapshot: (documentId: string, content: string, cause: SnapshotCause) =>
     invoke<SnapshotMeta | null>("create_snapshot", { documentId, content, cause }),
