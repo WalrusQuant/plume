@@ -54,7 +54,3 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     description: "Operational runbook with steps and procedures",
   },
 ];
-
-export function typeLabel(type: DocType): string {
-  return DOCUMENT_TYPES.find((t) => t.type === type)?.label ?? "Document";
-}
