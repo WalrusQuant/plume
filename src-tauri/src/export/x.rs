@@ -1,8 +1,9 @@
 //! X (Twitter) export. Two targets share one plain-text block render:
 //!   - `x-thread`: segment the doc into numbered posts (≤280 chars), keeping
 //!     code blocks intact and links flattened to "text (url)".
-//!   - `x-article`: rich HTML paste (reuses the preview HTML) + a plain-text
-//!     fallback for the X Article composer.
+//!   - `x-article`: rich HTML paste limited to what the X Article composer
+//!     keeps (headings, bold/italic/strike, lists, quotes, links, images);
+//!     tables and code blocks flatten to plain text. Plus a plain-text fallback.
 //!
 //! X has no markdown, so v1 emits plain text. Unicode styling like the
 //! LinkedIn exporter could be layered on later by extracting a shared
@@ -57,9 +58,148 @@ pub fn render_plain(content: &str) -> String {
         .to_string()
 }
 
-/// Rich HTML for the X Article composer — same comrak engine as the preview.
+/// HTML for the X Article composer. X keeps only a subset of formatting —
+/// headings, bold/italic/strikethrough, links, bullet/numbered lists,
+/// blockquotes, images, dividers — so this emits ONLY that. Tables and code
+/// blocks (which X drops) are flattened to plain paragraphs; footnotes and raw
+/// HTML are dropped. The result is what actually survives the paste, so the
+/// X-Article preview matches the destination rather than the app's render.
 pub fn render_article_html(content: &str) -> String {
-    crate::preview::render_html(content)
+    let arena = comrak::Arena::new();
+    let root = comrak::parse_document(&arena, content, &crate::preview::options());
+    let mut out = String::new();
+    article_blocks(root, &mut out);
+    out.trim().to_string()
+}
+
+fn esc(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn esc_attr(s: &str) -> String {
+    esc(s).replace('"', "&quot;")
+}
+
+fn article_blocks<'a>(node: &'a AstNode<'a>, out: &mut String) {
+    for child in node.children() {
+        match &child.data.borrow().value {
+            NodeValue::Heading(h) => {
+                let level = h.level.clamp(1, 6);
+                let mut inner = String::new();
+                article_inline(child, &mut inner);
+                out.push_str(&format!("<h{level}>{inner}</h{level}>\n"));
+            }
+            NodeValue::Paragraph => {
+                let mut inner = String::new();
+                article_inline(child, &mut inner);
+                if !inner.trim().is_empty() {
+                    out.push_str(&format!("<p>{inner}</p>\n"));
+                }
+            }
+            NodeValue::List(list) => article_list(child, list.list_type, out),
+            NodeValue::BlockQuote => {
+                out.push_str("<blockquote>\n");
+                article_blocks(child, out);
+                out.push_str("</blockquote>\n");
+            }
+            // X has no code blocks — flatten to a plain paragraph (line breaks kept)
+            NodeValue::CodeBlock(cb) => {
+                let text = esc(cb.literal.trim_end()).replace('\n', "<br>");
+                if !text.is_empty() {
+                    out.push_str(&format!("<p>{text}</p>\n"));
+                }
+            }
+            // X has no tables — flatten each row to a plain paragraph
+            NodeValue::Table(_) => article_table(child, out),
+            NodeValue::ThematicBreak => out.push_str("<hr>\n"),
+            // footnotes and raw HTML are dropped; descend into other containers
+            NodeValue::FootnoteDefinition(_) | NodeValue::HtmlBlock(_) => {}
+            _ => article_blocks(child, out),
+        }
+    }
+}
+
+fn article_list<'a>(list_node: &'a AstNode<'a>, list_type: ListType, out: &mut String) {
+    let tag = match list_type {
+        ListType::Bullet => "ul",
+        ListType::Ordered => "ol",
+    };
+    out.push_str(&format!("<{tag}>\n"));
+    for item in list_node.children() {
+        out.push_str("<li>");
+        article_item(item, out);
+        out.push_str("</li>\n");
+    }
+    out.push_str(&format!("</{tag}>\n"));
+}
+
+fn article_item<'a>(item: &'a AstNode<'a>, out: &mut String) {
+    for child in item.children() {
+        match &child.data.borrow().value {
+            // tight-list items hold a paragraph; render its text inline (no <p>)
+            NodeValue::Paragraph => article_inline(child, out),
+            NodeValue::List(inner) => article_list(child, inner.list_type, out),
+            _ => article_inline(child, out),
+        }
+    }
+}
+
+fn article_table<'a>(table: &'a AstNode<'a>, out: &mut String) {
+    for row in table.children() {
+        let cells: Vec<String> = row
+            .children()
+            .map(|cell| {
+                let mut c = String::new();
+                article_inline(cell, &mut c);
+                c.trim().to_string()
+            })
+            .filter(|c| !c.is_empty())
+            .collect();
+        if !cells.is_empty() {
+            out.push_str(&format!("<p>{}</p>\n", cells.join(" — ")));
+        }
+    }
+}
+
+fn article_inline<'a>(node: &'a AstNode<'a>, out: &mut String) {
+    for child in node.children() {
+        match &child.data.borrow().value {
+            NodeValue::Text(t) => out.push_str(&esc(t)),
+            // X has no inline code — emit the literal as plain text
+            NodeValue::Code(c) => out.push_str(&esc(&c.literal)),
+            NodeValue::Strong => {
+                out.push_str("<strong>");
+                article_inline(child, out);
+                out.push_str("</strong>");
+            }
+            NodeValue::Emph => {
+                out.push_str("<em>");
+                article_inline(child, out);
+                out.push_str("</em>");
+            }
+            NodeValue::Strikethrough => {
+                out.push_str("<del>");
+                article_inline(child, out);
+                out.push_str("</del>");
+            }
+            NodeValue::Link(link) => {
+                let mut text = String::new();
+                article_inline(child, &mut text);
+                let text = if text.is_empty() { esc(&link.url) } else { text };
+                out.push_str(&format!("<a href=\"{}\">{text}</a>", esc_attr(&link.url)));
+            }
+            NodeValue::Image(img) => {
+                let mut alt = String::new();
+                article_inline(child, &mut alt);
+                out.push_str(&format!("<img src=\"{}\" alt=\"{}\">", esc_attr(&img.url), esc_attr(&alt)));
+            }
+            NodeValue::SoftBreak => out.push(' '),
+            NodeValue::LineBreak => out.push_str("<br>"),
+            // raw inline HTML and footnote refs are dropped
+            NodeValue::HtmlInline(_) | NodeValue::FootnoteReference(_) => {}
+            _ => article_inline(child, out),
+        }
+    }
 }
 
 fn collect_blocks(content: &str) -> Vec<Block> {
@@ -332,10 +472,29 @@ mod tests {
     }
 
     #[test]
-    fn article_html_uses_preview_engine() {
-        let html = render_article_html("# Title\n\nBody");
+    fn article_html_keeps_supported_formatting() {
+        let html = render_article_html("# Title\n\n**bold** and *em* and ~~no~~\n\n- one\n- two");
         assert!(html.contains("<h1>Title</h1>"));
-        assert!(html.contains("<p>Body</p>"));
+        assert!(html.contains("<strong>bold</strong>"));
+        assert!(html.contains("<em>em</em>"));
+        assert!(html.contains("<del>no</del>"));
+        assert!(html.contains("<ul>"));
+        assert!(html.contains("<li>one</li>"));
+    }
+
+    #[test]
+    fn article_html_flattens_what_x_drops() {
+        let md = "| a | b |\n| - | - |\n| 1 | 2 |\n\n```\ncode here\n```\n\ntext[^1]\n\n[^1]: note";
+        let html = render_article_html(md);
+        // tables and code blocks must not reach X as <table>/<pre>
+        assert!(!html.contains("<table"), "table leaked: {html}");
+        assert!(!html.contains("<pre"), "code block leaked: {html}");
+        assert!(!html.contains("<code"), "code leaked: {html}");
+        // their text survives, flattened into paragraphs
+        assert!(html.contains("1 — 2"), "table not flattened: {html}");
+        assert!(html.contains("code here"), "code text lost: {html}");
+        // footnote markers are dropped
+        assert!(!html.contains("footnote"), "footnote leaked: {html}");
     }
 
     #[test]

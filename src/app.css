@@ -554,19 +554,19 @@ button:focus-visible {
   padding: 8px 16px 0;
 }
 
-.preview-mode-btn {
-  padding: 3px 10px;
+.preview-mode-select {
+  padding: 4px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: none;
-  color: var(--preview-text-secondary);
-  font-size: 11px;
+  border-radius: var(--radius-sm);
+  background: var(--preview-bg);
+  color: var(--preview-text);
+  font-size: 12px;
   font-family: var(--font-sans);
   cursor: pointer;
 }
 
-.preview-mode-btn--active {
-  color: var(--preview-text);
+.preview-mode-select:focus {
+  outline: none;
   border-color: var(--accent);
 }
 

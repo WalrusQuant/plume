@@ -101,6 +101,12 @@ pub fn render_x_thread_preview(content: String) -> String {
 }
 
 #[tauri::command]
+pub fn render_x_article_preview(content: String) -> String {
+    // bound to the export renderer so the preview tracks the actual paste
+    export::x::render_article_html(&content)
+}
+
+#[tauri::command]
 pub fn list_export_targets() -> Vec<ExportTarget> {
     export::TARGETS.to_vec()
 }
