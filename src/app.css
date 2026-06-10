@@ -1919,3 +1919,126 @@ button:focus-visible {
   opacity: 0.7;
   max-width: 320px;
 }
+
+/* ---------- Inline AI edit (CodeMirror) ---------- */
+
+/* selection menu (Rewrite / Shorten / Expand / Custom) */
+.cm-ie-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  background: var(--toolbar-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-sans);
+  max-width: 280px;
+}
+
+.cm-ie-menu-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.cm-ie-menu-btn:hover {
+  background: var(--accent-surface);
+  border-color: var(--accent);
+}
+
+.cm-ie-custom {
+  flex-basis: 100%;
+  display: flex;
+  margin-top: 2px;
+}
+
+.cm-ie-input {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--editor-bg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.cm-ie-input:focus {
+  border-color: var(--accent);
+}
+
+/* the original text being edited, dimmed while the replacement streams */
+.cm-ie-dim {
+  opacity: 0.4;
+  text-decoration: line-through;
+  text-decoration-color: var(--text-tertiary);
+}
+
+/* block widget showing the streamed replacement + Accept/Reject */
+.cm-ie-widget {
+  margin: 4px 0;
+  padding: 8px 10px;
+  background: var(--accent-surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+}
+
+.cm-ie-widget-text {
+  white-space: pre-wrap;
+  font-size: 0.95em;
+  color: var(--text-primary);
+}
+
+.cm-ie-widget-footer {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.cm-ie-accept,
+.cm-ie-reject {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.cm-ie-accept {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.cm-ie-accept:hover {
+  background: var(--accent-dim);
+}
+
+.cm-ie-reject {
+  color: var(--text-secondary);
+  background: transparent;
+}
+
+.cm-ie-reject:hover {
+  background: var(--danger-surface);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cm-ie-hint {
+  font-size: 11px;
+  font-family: var(--font-sans);
+  color: var(--text-tertiary);
+}

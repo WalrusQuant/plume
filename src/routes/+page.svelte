@@ -17,6 +17,7 @@
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import { assistant } from "$lib/assistant.svelte";
+  import { inlineEdit } from "$lib/inlineEdit.svelte";
   import { toast } from "$lib/toast.svelte";
   import type { SnapshotMeta } from "$lib/api";
 
@@ -236,6 +237,12 @@
     schedulePreview(content);
     wordCount = countWords(content);
     void assistant.loadFor(id);
+    inlineEdit.setContext(id, () => content, refreshHistoryIfOpen);
+    if (rightTab === "history") void loadSnapshots();
+  }
+
+  /** Refresh the history panel after an inline edit lands an ai-edit snapshot. */
+  function refreshHistoryIfOpen() {
     if (rightTab === "history") void loadSnapshots();
   }
 
@@ -301,6 +308,7 @@
     const stored = localStorage.getItem(THEME_KEY);
     applyTheme(stored === "light" || stored === "dark" ? stored : "dark");
     void assistant.init();
+    void inlineEdit.init();
 
     (async () => {
       try {
@@ -324,6 +332,7 @@
       window.removeEventListener("beforeunload", flush);
       void flushSave();
       assistant.destroy();
+      inlineEdit.destroy();
     };
   });
 </script>
