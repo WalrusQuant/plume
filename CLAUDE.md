@@ -1,4 +1,4 @@
-# Markdown — write once, publish everywhere
+# Plume — write once, publish everywhere
 
 Local-first Tauri v2 desktop markdown writing app with an AI writing partner
 and per-platform export. Audience: content creators who write in markdown and

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Markdown",
+  "productName": "Plume",
   "version": "0.1.0",
   "identifier": "com.adamwickwire.markdown",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Markdown",
+        "title": "Plume",
         "width": 1280,
         "height": 800
       }
