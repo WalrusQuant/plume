@@ -13,13 +13,17 @@
   import NewDocumentDialog from "$lib/components/NewDocumentDialog.svelte";
   import RightPaneTabs, { type RightPaneTab } from "$lib/components/RightPaneTabs.svelte";
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
+  import HistoryPanel from "$lib/components/HistoryPanel.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import { assistant } from "$lib/assistant.svelte";
   import { toast } from "$lib/toast.svelte";
+  import type { SnapshotMeta } from "$lib/api";
 
   const SAVE_DEBOUNCE_MS = 500;
   const PREVIEW_DEBOUNCE_MS = 150;
+  /** How often active editing produces an automatic version snapshot. */
+  const SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
   const THEME_KEY = "markdown-theme";
 
   let documents = $state<Document[]>([]);
@@ -34,8 +38,10 @@
   let sidebarCollapsed = $state(false);
   let dialogOpen = $state(false);
   let settingsOpen = $state(false);
-  let previewMode = $state<"rendered" | "linkedin">("rendered");
+  type PreviewMode = "rendered" | "linkedin" | "x-thread";
+  let previewMode = $state<PreviewMode>("rendered");
   let linkedinText = $state("");
+  let xThreadText = $state("");
 
   /** Fire-and-forget with a visible error toast on failure. */
   function run(promise: Promise<unknown>, what: string) {
@@ -50,6 +56,11 @@
   let exportTargets = $state<import("$lib/api").ExportTarget[]>([]);
   let exportStatus = $state("");
   let exportStatusTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // ----- version snapshots (history) -----
+  let snapshots = $state<SnapshotMeta[]>([]);
+  /** Last automatic-snapshot time per document, to throttle interval captures. */
+  const lastSnapshotAt = new Map<string, number>();
 
   const selectedDoc = $derived(documents.find((d) => d.id === selectedDocId));
 
@@ -84,7 +95,20 @@
       }
       const doc = documents.find((d) => d.id === id);
       if (doc) doc.updatedAt = new Date().toISOString();
+      maybeIntervalSnapshot(id, content);
     }
+  }
+
+  /** Capture an automatic version once per SNAPSHOT_INTERVAL_MS of editing. */
+  function maybeIntervalSnapshot(id: string, content: string) {
+    if (Date.now() - (lastSnapshotAt.get(id) ?? 0) < SNAPSHOT_INTERVAL_MS) return;
+    lastSnapshotAt.set(id, Date.now());
+    void api
+      .createSnapshot(id, content, "interval")
+      .then((snap) => {
+        if (snap && id === selectedDocId && rightTab === "history") void loadSnapshots();
+      })
+      .catch((e) => toast.error(`Snapshot failed: ${e}`));
   }
 
   // ----- preview (debounced render via comrak) -----
@@ -99,12 +123,14 @@
   async function updatePreview(content: string) {
     if (previewMode === "linkedin") {
       linkedinText = await api.renderLinkedinPreview(content);
+    } else if (previewMode === "x-thread") {
+      xThreadText = await api.renderXThreadPreview(content);
     } else {
       previewHtml = await api.renderPreview(content);
     }
   }
 
-  function setPreviewMode(mode: "rendered" | "linkedin") {
+  function setPreviewMode(mode: PreviewMode) {
     previewMode = mode;
     run(updatePreview(content), "Preview");
   }
@@ -137,6 +163,14 @@
       if (result.type === "clipboard") {
         await navigator.clipboard.writeText(result.text);
         showExportStatus("Copied to clipboard — ready to paste");
+      } else if (result.type === "clipboardHtml") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([result.html], { type: "text/html" }),
+            "text/plain": new Blob([result.plain], { type: "text/plain" }),
+          }),
+        ]);
+        showExportStatus("Copied (rich) — paste into the editor");
       } else if (result.type === "file") {
         showExportStatus(`Saved: ${result.path}`);
       }
@@ -160,6 +194,37 @@
     });
   }
 
+  // ----- version snapshots -----
+
+  async function loadSnapshots() {
+    snapshots = selectedDocId ? await api.listSnapshots(selectedDocId) : [];
+  }
+
+  async function saveSnapshot() {
+    if (!selectedDocId) return;
+    await flushSave();
+    const snap = await api.createSnapshot(selectedDocId, content, "manual");
+    if (snap) lastSnapshotAt.set(selectedDocId, Date.now());
+    await loadSnapshots();
+  }
+
+  async function restoreSnapshot(snapshotId: string) {
+    if (!selectedDocId || !editorView) return;
+    // safety capture of the current text, then swap in the restored version
+    await api.createSnapshot(selectedDocId, content, "restore");
+    const restored = await api.getSnapshotContent(snapshotId);
+    // dispatch so the editor's updateListener drives save + preview (one-way flow)
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: restored },
+    });
+    await loadSnapshots();
+  }
+
+  function changeRightTab(tab: RightPaneTab) {
+    rightTab = tab;
+    if (tab === "history") run(loadSnapshots(), "Loading history");
+  }
+
   // ----- document/folder actions -----
 
   async function selectDocument(id: string) {
@@ -171,6 +236,7 @@
     schedulePreview(content);
     wordCount = countWords(content);
     void assistant.loadFor(id);
+    if (rightTab === "history") void loadSnapshots();
   }
 
   async function createDocument(name: string, type: DocType) {
@@ -313,7 +379,7 @@
           {/key}
         </div>
         <div class="preview-pane">
-          <RightPaneTabs activeTab={rightTab} onTabChange={(tab) => (rightTab = tab)} />
+          <RightPaneTabs activeTab={rightTab} onTabChange={changeRightTab} />
           {#if rightTab === "preview"}
             <div class="preview-mode-row">
               <button
@@ -328,12 +394,27 @@
               >
                 LinkedIn
               </button>
+              <button
+                class="preview-mode-btn {previewMode === 'x-thread' ? 'preview-mode-btn--active' : ''}"
+                onclick={() => setPreviewMode("x-thread")}
+              >
+                X thread
+              </button>
             </div>
             {#if previewMode === "linkedin"}
               <pre class="linkedin-preview">{linkedinText}</pre>
+            {:else if previewMode === "x-thread"}
+              <pre class="linkedin-preview">{xThreadText}</pre>
             {:else}
               <Preview htmlContent={previewHtml} />
             {/if}
+          {:else if rightTab === "history"}
+            <HistoryPanel
+              {snapshots}
+              onSaveSnapshot={() => run(saveSnapshot(), "Save snapshot")}
+              onRestore={(id) => run(restoreSnapshot(id), "Restore")}
+              getSnapshotContent={(id) => api.getSnapshotContent(id)}
+            />
           {:else}
             <AssistantPanel
               onApply={applyAssistantContent}

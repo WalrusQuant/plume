@@ -22,6 +22,7 @@ const DEV_KEYS_FILE: &str = "dev-keys.json";
 const EVT_TOKEN: &str = "assistant:token";
 const EVT_DONE: &str = "assistant:done";
 const EVT_ERROR: &str = "assistant:error";
+const EVT_USAGE: &str = "assistant:usage";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -242,15 +243,32 @@ async fn error_for_status(response: reqwest::Response, provider: &str) -> Result
     Err(Error::InvalidInput(format!("{provider} API error {status}: {detail}")))
 }
 
+/// One meaningful piece extracted from an SSE event.
+enum Chunk {
+    /// A text delta to append to the response.
+    Token(String),
+    /// A token-usage update (absolute counts; 0 means "unknown, leave as-is").
+    Usage { input: u64, output: u64 },
+    /// Nothing of interest in this event.
+    None,
+}
+
+#[derive(Default)]
+struct Usage {
+    input: u64,
+    output: u64,
+}
+
 /// Send a provider request and emit a token event per SSE payload. `extract`
-/// is the only provider-specific part: pull the text delta out of an event
-/// (Ok(None) to skip it) or return the provider's in-stream error.
+/// is the only provider-specific part: pull the text delta or usage out of an
+/// event, or return the provider's in-stream error. A final `assistant:usage`
+/// event is emitted once the stream completes.
 async fn stream_sse(
     app: &AppHandle,
     stream_id: &str,
     provider_label: &str,
     request: reqwest::RequestBuilder,
-    extract: impl Fn(&serde_json::Value) -> Result<Option<String>>,
+    extract: impl Fn(&serde_json::Value) -> Result<Chunk>,
 ) -> Result<()> {
     let response = request
         .send()
@@ -258,6 +276,7 @@ async fn stream_sse(
         .map_err(|e| Error::InvalidInput(format!("request failed: {e}")))?;
     let response = error_for_status(response, provider_label).await?;
 
+    let mut usage = Usage::default();
     for_each_sse_data(response, |data| {
         if data == "[DONE]" {
             return Ok(());
@@ -265,14 +284,35 @@ async fn stream_sse(
         let Ok(event) = serde_json::from_str::<serde_json::Value>(data) else {
             return Ok(());
         };
-        if let Some(text) = extract(&event)? {
-            if !text.is_empty() {
-                let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
+        match extract(&event)? {
+            Chunk::Token(text) => {
+                if !text.is_empty() {
+                    let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
+                }
             }
+            // providers report usage incrementally (e.g. input first, output
+            // last); keep the latest non-zero value for each field
+            Chunk::Usage { input, output } => {
+                if input > 0 {
+                    usage.input = input;
+                }
+                if output > 0 {
+                    usage.output = output;
+                }
+            }
+            Chunk::None => {}
         }
         Ok(())
     })
-    .await
+    .await?;
+
+    if usage.input > 0 || usage.output > 0 {
+        let _ = app.emit(
+            EVT_USAGE,
+            json!({ "id": stream_id, "inputTokens": usage.input, "outputTokens": usage.output }),
+        );
+    }
+    Ok(())
 }
 
 async fn stream_anthropic(
@@ -300,15 +340,28 @@ async fn stream_anthropic(
 
     stream_sse(app, stream_id, "Anthropic", request, |event| match event["type"].as_str() {
         Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
-            Ok(event["delta"]["text"].as_str().map(String::from))
+            Ok(event["delta"]["text"].as_str().map_or(Chunk::None, |t| Chunk::Token(t.into())))
         }
+        // input_tokens arrive in message_start; output_tokens accumulate in message_delta
+        Some("message_start") => Ok(anthropic_usage(&event["message"]["usage"])),
+        Some("message_delta") => Ok(anthropic_usage(&event["usage"])),
         Some("error") => {
             let msg = event["error"]["message"].as_str().unwrap_or("stream error");
             Err(Error::InvalidInput(msg.to_string()))
         }
-        _ => Ok(None),
+        _ => Ok(Chunk::None),
     })
     .await
+}
+
+/// Pull a usage chunk from an Anthropic `usage` object. The reported input is
+/// the prompt total including any cached tokens.
+fn anthropic_usage(u: &serde_json::Value) -> Chunk {
+    let n = |k: &str| u[k].as_u64().unwrap_or(0);
+    Chunk::Usage {
+        input: n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens"),
+        output: n("output_tokens"),
+    }
 }
 
 async fn stream_openrouter(
@@ -329,6 +382,8 @@ async fn stream_openrouter(
         "model": model,
         "messages": all_messages,
         "stream": true,
+        // ask for a final usage chunk (OpenAI-compatible streaming option)
+        "stream_options": {"include_usage": true},
     });
     let request = reqwest::Client::new()
         .post(OPENROUTER_URL)
@@ -342,7 +397,16 @@ async fn stream_openrouter(
         if let Some(msg) = event["error"]["message"].as_str() {
             return Err(Error::InvalidInput(msg.to_string()));
         }
-        Ok(event["choices"][0]["delta"]["content"].as_str().map(String::from))
+        // the final chunk carries usage with an empty choices array
+        if event["usage"].is_object() {
+            return Ok(Chunk::Usage {
+                input: event["usage"]["prompt_tokens"].as_u64().unwrap_or(0),
+                output: event["usage"]["completion_tokens"].as_u64().unwrap_or(0),
+            });
+        }
+        Ok(event["choices"][0]["delta"]["content"]
+            .as_str()
+            .map_or(Chunk::None, |t| Chunk::Token(t.into())))
     })
     .await
 }
