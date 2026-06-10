@@ -44,6 +44,7 @@ export interface ExportTarget {
 
 export type ExportOutput =
   | { type: "clipboard"; text: string }
+  | { type: "clipboardHtml"; html: string; plain: string }
   | { type: "file"; path: string }
   | { type: "cancelled" };
 
@@ -64,6 +65,8 @@ export const api = {
   renderPreview: (content: string) => invoke<string>("render_preview", { content }),
   renderLinkedinPreview: (content: string) =>
     invoke<string>("render_linkedin_preview", { content }),
+  renderXThreadPreview: (content: string) =>
+    invoke<string>("render_x_thread_preview", { content }),
 
   listFolders: () => invoke<Folder[]>("list_folders"),
   createFolder: (name: string) => invoke<Folder>("create_folder", { name }),

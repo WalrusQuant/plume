@@ -121,7 +121,7 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 - [ ] General hardening pass on the assistant — user expects to do "a lot" here; treat the chat as a core surface, not a bolt-on.
 
 ### Export backlog (2026-06-09)
-- [ ] **X Article (rich clipboard)** — user loved the LinkedIn clipboard export ("hottest ticket") and X articles paste the same way; needs HTML-flavored clipboard write (`clipboard.write` with text/html) rather than plain text.
+- [x] **X thread + X Article (rich clipboard)** — shipped 2026-06-10 (v2 roadmap #1). `export/x.rs`: thread segmenter (≤280-char numbered posts, code blocks intact, links flattened) + plain renderer; `x-article` uses an HTML-flavored clipboard write (`navigator.clipboard.write` with text/html + text/plain) reusing the preview HTML. New `ExportOutput::ClipboardHtml` variant; `render_x_thread_preview` command + an "X thread" preview pill. 7 unit tests.
 - [ ] Docx polish round 2 pending user feedback (fonts/spacing/tables shipped 2026-06-09).
 - [ ] **v2 (later):** publish-to-API targets (Ghost/beehiiv/Dev.to), AI-adapted export, optional cloud sync/backup, PDF/EPUB.
 

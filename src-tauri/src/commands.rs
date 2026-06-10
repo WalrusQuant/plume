@@ -96,6 +96,11 @@ pub fn render_linkedin_preview(content: String) -> String {
 }
 
 #[tauri::command]
+pub fn render_x_thread_preview(content: String) -> String {
+    export::x::render_thread_text(&content)
+}
+
+#[tauri::command]
 pub fn list_export_targets() -> Vec<ExportTarget> {
     export::TARGETS.to_vec()
 }
@@ -115,6 +120,13 @@ pub async fn export_document(
     match target.id {
         "linkedin" => Ok(ExportOutput::Clipboard {
             text: export::linkedin::render(&content),
+        }),
+        "x-thread" => Ok(ExportOutput::Clipboard {
+            text: export::x::render_thread_text(&content),
+        }),
+        "x-article" => Ok(ExportOutput::ClipboardHtml {
+            html: export::x::render_article_html(&content),
+            plain: export::x::render_plain(&content),
         }),
         "html" => {
             let bytes = export::html::render(&content, &doc_name).into_bytes();
