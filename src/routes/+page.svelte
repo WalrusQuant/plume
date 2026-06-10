@@ -34,8 +34,10 @@
   let sidebarCollapsed = $state(false);
   let dialogOpen = $state(false);
   let settingsOpen = $state(false);
-  let previewMode = $state<"rendered" | "linkedin">("rendered");
+  type PreviewMode = "rendered" | "linkedin" | "x-thread";
+  let previewMode = $state<PreviewMode>("rendered");
   let linkedinText = $state("");
+  let xThreadText = $state("");
 
   /** Fire-and-forget with a visible error toast on failure. */
   function run(promise: Promise<unknown>, what: string) {
@@ -99,12 +101,14 @@
   async function updatePreview(content: string) {
     if (previewMode === "linkedin") {
       linkedinText = await api.renderLinkedinPreview(content);
+    } else if (previewMode === "x-thread") {
+      xThreadText = await api.renderXThreadPreview(content);
     } else {
       previewHtml = await api.renderPreview(content);
     }
   }
 
-  function setPreviewMode(mode: "rendered" | "linkedin") {
+  function setPreviewMode(mode: PreviewMode) {
     previewMode = mode;
     run(updatePreview(content), "Preview");
   }
@@ -137,6 +141,14 @@
       if (result.type === "clipboard") {
         await navigator.clipboard.writeText(result.text);
         showExportStatus("Copied to clipboard — ready to paste");
+      } else if (result.type === "clipboardHtml") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([result.html], { type: "text/html" }),
+            "text/plain": new Blob([result.plain], { type: "text/plain" }),
+          }),
+        ]);
+        showExportStatus("Copied (rich) — paste into the editor");
       } else if (result.type === "file") {
         showExportStatus(`Saved: ${result.path}`);
       }
@@ -328,9 +340,17 @@
               >
                 LinkedIn
               </button>
+              <button
+                class="preview-mode-btn {previewMode === 'x-thread' ? 'preview-mode-btn--active' : ''}"
+                onclick={() => setPreviewMode("x-thread")}
+              >
+                X thread
+              </button>
             </div>
             {#if previewMode === "linkedin"}
               <pre class="linkedin-preview">{linkedinText}</pre>
+            {:else if previewMode === "x-thread"}
+              <pre class="linkedin-preview">{xThreadText}</pre>
             {:else}
               <Preview htmlContent={previewHtml} />
             {/if}
