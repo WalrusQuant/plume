@@ -34,6 +34,7 @@ pub fn run() {
             commands::get_document_content,
             commands::save_document_content,
             commands::render_preview,
+            commands::render_linkedin_preview,
             commands::list_export_targets,
             commands::export_document,
             commands::list_folders,

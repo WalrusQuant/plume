@@ -1,10 +1,21 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
-  import { EditorState, Compartment } from "@codemirror/state";
+  import { keymap } from "@codemirror/view";
+  import { EditorState, Compartment, Prec } from "@codemirror/state";
   import { markdown } from "@codemirror/lang-markdown";
   import { languages } from "@codemirror/language-data";
   import { themeExtensions, type Theme } from "$lib/editor/themes";
+  import { toggleBold, toggleItalic, insertLink, toggleInlineCode } from "$lib/editor/formatting";
+
+  const formattingKeymap = Prec.high(
+    keymap.of([
+      { key: "Mod-b", run: (v) => (toggleBold(v), true) },
+      { key: "Mod-i", run: (v) => (toggleItalic(v), true) },
+      { key: "Mod-k", run: (v) => (insertLink(v), true) },
+      { key: "Mod-e", run: (v) => (toggleInlineCode(v), true) },
+    ]),
+  );
 
   interface Props {
     /** Initial document text; the editor owns the text after mount.
@@ -27,6 +38,7 @@
       doc: content,
       extensions: [
         basicSetup,
+        formattingKeymap,
         EditorView.lineWrapping,
         themeComp.of(themeExtensions(theme)),
         markdown({ codeLanguages: languages }),

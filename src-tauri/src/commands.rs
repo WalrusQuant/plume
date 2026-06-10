@@ -91,6 +91,11 @@ pub fn delete_folder(db: State<Db>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn render_linkedin_preview(content: String) -> String {
+    export::linkedin::render(&content)
+}
+
+#[tauri::command]
 pub fn list_export_targets() -> Vec<ExportTarget> {
     export::TARGETS.to_vec()
 }

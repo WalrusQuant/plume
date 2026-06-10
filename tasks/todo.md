@@ -112,7 +112,7 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 - [x] **M3 — Preview + Sidebar.** Live preview (comrak via `render_preview` command, 150ms debounce), sidebar tree, doc/folder CRUD, templates, light/dark. ✅ 2026-06-09
 - [x] **M4 — AI assistant.** Rust streaming AI via events; Svelte chat panel; key in keychain; inline "apply to document". ✅ 2026-06-09
 - [x] **M5 — Export v1.** Renderer trait + targets: LinkedIn (clipboard), clean HTML (file), `.docx` (file). Native save dialogs. (X thread deferred to v2 per decision 2.) ✅ 2026-06-09
-- [ ] **M6 — Polish.** Settings, model picker, error states, multi-preview. First usable daily-driver build.
+- [x] **M6 — Polish.** Settings, model picker, error states, multi-preview. First usable daily-driver build. ✅ 2026-06-09 — **v1 complete.**
 
 ### AI chat backlog (user request, 2026-06-09 — revisit after M5)
 - [ ] **Multiple chats per document** — new-chat button; thread list/switcher per doc (schema: add a `chats` table, `chat_messages.chat_id` instead of `document_id`).
@@ -186,3 +186,10 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 - **docx (file):** docx-rs structural build — Calibri 11pt defaults, LineSpacing before/after on headings/body (Word adds none), real bordered tables w/ bold header row, mono code lines, indented italic quotes, "•/1." prefixed lists. Round 2 (font/spacing/tables) after user's "styling fucked up" feedback → "perfect".
 - Save dialogs: Rust-side `blocking_save_file` in `spawn_blocking`; export flushes pending save first; status message in TopBar.
 - Verified: 22 unit tests; live by user (all three targets).
+
+### M6 — Polish (2026-06-09) — v1 COMPLETE
+- **Toasts:** `toast.svelte.ts` store + `Toasts.svelte` (bottom-right, dismissible, 6s auto). All page-level async ops wrapped via `run(promise, what)`; failed saves keep `pendingContent` and retry.
+- **SettingsDialog:** provider cards + model input w/ datalist suggestions (opus-4-8/sonnet-4-6/haiku-4-5 per provider) + key field with saved-status. Opened from TopBar gear and AssistantPanel (inline key form removed).
+- **Editor keymap:** Mod-b/i/k/e → toggleBold/Italic/insertLink/inlineCode (Prec.high over basicSetup).
+- **Multi-preview:** Rendered | LinkedIn pills in preview pane; `render_linkedin_preview` command shows exact clipboard text.
+- Verified live by user: "everything works."

@@ -13,7 +13,10 @@
   import NewDocumentDialog from "$lib/components/NewDocumentDialog.svelte";
   import RightPaneTabs, { type RightPaneTab } from "$lib/components/RightPaneTabs.svelte";
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
+  import SettingsDialog from "$lib/components/SettingsDialog.svelte";
+  import Toasts from "$lib/components/Toasts.svelte";
   import { assistant } from "$lib/assistant.svelte";
+  import { toast } from "$lib/toast.svelte";
 
   const SAVE_DEBOUNCE_MS = 500;
   const PREVIEW_DEBOUNCE_MS = 150;
@@ -28,6 +31,14 @@
   let theme = $state<Theme>("dark");
   let sidebarCollapsed = $state(false);
   let dialogOpen = $state(false);
+  let settingsOpen = $state(false);
+  let previewMode = $state<"rendered" | "linkedin">("rendered");
+  let linkedinText = $state("");
+
+  /** Fire-and-forget with a visible error toast on failure. */
+  function run(promise: Promise<unknown>, what: string) {
+    promise.catch((e) => toast.error(`${what} failed: ${e}`));
+  }
 
   let editorView = $state<EditorView | null>(null);
   let cursorPos = $state({ line: 1, col: 1 });
@@ -63,7 +74,13 @@
       const id = savingDocId;
       const content = pendingContent;
       pendingContent = null;
-      await api.saveDocumentContent(id, content);
+      try {
+        await api.saveDocumentContent(id, content);
+      } catch (e) {
+        pendingContent = content; // keep it; the next keystroke or flush retries
+        toast.error(`Saving failed: ${e}`);
+        return;
+      }
       const doc = documents.find((d) => d.id === id);
       if (doc) doc.updatedAt = new Date().toISOString();
     }
@@ -75,9 +92,20 @@
 
   function schedulePreview(content: string) {
     if (previewTimer) clearTimeout(previewTimer);
-    previewTimer = setTimeout(async () => {
+    previewTimer = setTimeout(() => run(updatePreview(content), "Preview"), PREVIEW_DEBOUNCE_MS);
+  }
+
+  async function updatePreview(content: string) {
+    if (previewMode === "linkedin") {
+      linkedinText = await api.renderLinkedinPreview(content);
+    } else {
       previewHtml = await api.renderPreview(content);
-    }, PREVIEW_DEBOUNCE_MS);
+    }
+  }
+
+  function setPreviewMode(mode: "rendered" | "linkedin") {
+    previewMode = mode;
+    run(updatePreview(currentContent), "Preview");
   }
 
   function countWords(content: string): number {
@@ -209,13 +237,17 @@
     void assistant.init();
 
     (async () => {
-      [documents, folders, exportTargets] = await Promise.all([
-        api.listDocuments(),
-        api.listFolders(),
-        api.listExportTargets(),
-      ]);
-      if (documents.length > 0) {
-        await selectDocument(documents[0].id);
+      try {
+        [documents, folders, exportTargets] = await Promise.all([
+          api.listDocuments(),
+          api.listFolders(),
+          api.listExportTargets(),
+        ]);
+        if (documents.length > 0) {
+          await selectDocument(documents[0].id);
+        }
+      } catch (e) {
+        toast.error(`Loading documents failed: ${e}`);
       }
       loading = false;
     })();
@@ -235,20 +267,22 @@
     {documents}
     {folders}
     {selectedDocId}
-    onSelect={(id) => void selectDocument(id)}
+    onSelect={(id) => run(selectDocument(id), "Opening document")}
     onNewDocument={() => (dialogOpen = true)}
-    onRename={(id, name) => void renameDocument(id, name)}
-    onDelete={(id) => void deleteDocument(id)}
-    onMoveDocument={(id, folderId) => void moveDocument(id, folderId)}
+    onRename={(id, name) => run(renameDocument(id, name), "Rename")}
+    onDelete={(id) => run(deleteDocument(id), "Delete")}
+    onMoveDocument={(id, folderId) => run(moveDocument(id, folderId), "Move")}
     onCreateFolder={createFolder}
-    onRenameFolder={(id, name) => void renameFolder(id, name)}
-    onDeleteFolder={(id) => void deleteFolder(id)}
+    onRenameFolder={(id, name) => run(renameFolder(id, name), "Rename folder")}
+    onDeleteFolder={(id) => run(deleteFolder(id), "Delete folder")}
   />
   <NewDocumentDialog
     open={dialogOpen}
     onClose={() => (dialogOpen = false)}
-    onCreate={(name, type) => void createDocument(name, type)}
+    onCreate={(name, type) => run(createDocument(name, type), "Create document")}
   />
+  <SettingsDialog open={settingsOpen} onClose={() => (settingsOpen = false)} />
+  <Toasts />
   <div class="main-content">
     {#if loading}
       <div class="loading"><div class="loading-spinner"></div></div>
@@ -259,10 +293,11 @@
         onToggleTheme={() => applyTheme(theme === "dark" ? "light" : "dark")}
         {sidebarCollapsed}
         onToggleSidebar={() => (sidebarCollapsed = !sidebarCollapsed)}
-        onRename={(name) => void renameDocument(selectedDoc.id, name)}
+        onRename={(name) => run(renameDocument(selectedDoc.id, name), "Rename")}
         {exportTargets}
-        onExport={(targetId) => void exportTo(targetId)}
+        onExport={(targetId) => run(exportTo(targetId), "Export")}
         {exportStatus}
+        onOpenSettings={() => (settingsOpen = true)}
       />
       <Toolbar {editorView} />
       <div class="editor-container">
@@ -280,12 +315,31 @@
         <div class="preview-pane">
           <RightPaneTabs activeTab={rightTab} onTabChange={(tab) => (rightTab = tab)} />
           {#if rightTab === "preview"}
-            <Preview htmlContent={previewHtml} />
+            <div class="preview-mode-row">
+              <button
+                class="preview-mode-btn {previewMode === 'rendered' ? 'preview-mode-btn--active' : ''}"
+                onclick={() => setPreviewMode("rendered")}
+              >
+                Rendered
+              </button>
+              <button
+                class="preview-mode-btn {previewMode === 'linkedin' ? 'preview-mode-btn--active' : ''}"
+                onclick={() => setPreviewMode("linkedin")}
+              >
+                LinkedIn
+              </button>
+            </div>
+            {#if previewMode === "linkedin"}
+              <pre class="linkedin-preview">{linkedinText}</pre>
+            {:else}
+              <Preview htmlContent={previewHtml} />
+            {/if}
           {:else}
             <AssistantPanel
               onApply={applyAssistantContent}
               onInsert={insertAssistantContent}
               getDocumentContent={() => currentContent}
+              onOpenSettings={() => (settingsOpen = true)}
             />
           {/if}
         </div>

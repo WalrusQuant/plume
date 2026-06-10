@@ -62,6 +62,8 @@ export const api = {
     invoke<void>("save_document_content", { id, content }),
 
   renderPreview: (content: string) => invoke<string>("render_preview", { content }),
+  renderLinkedinPreview: (content: string) =>
+    invoke<string>("render_linkedin_preview", { content }),
 
   listFolders: () => invoke<Folder[]>("list_folders"),
   createFolder: (name: string) => invoke<Folder>("create_folder", { name }),
