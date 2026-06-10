@@ -188,12 +188,13 @@ pub fn delete_api_key(app: AppHandle, provider: Provider) -> Result<()> {
 pub fn send_assistant_message(
     app: AppHandle,
     state: State<AiState>,
+    stream_id: String,
     provider: Provider,
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
 ) -> Result<()> {
-    ai::start_stream(app, &state, provider, model, messages, document_content)
+    ai::start_stream(app, &state, stream_id, provider, model, messages, document_content)
 }
 
 #[tauri::command]

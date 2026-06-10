@@ -23,6 +23,19 @@ function loadSettings(): AISettings {
   return { provider: "anthropic", model: DEFAULT_MODELS.anthropic };
 }
 
+/** Payloads of the assistant:* events emitted by ai.rs. */
+interface StreamToken {
+  id: string;
+  text: string;
+}
+interface StreamDone {
+  id: string;
+}
+interface StreamError {
+  id: string;
+  message: string;
+}
+
 /** Chat state + Tauri event plumbing for the AI panel. The HTTP call and the
     API key live in Rust; this store only sends commands and accumulates the
     streamed tokens. Provider/model (not secret) persist in localStorage. */
@@ -33,20 +46,33 @@ class AssistantStore {
   settings = $state<AISettings>(loadSettings());
 
   private docId: string | null = null;
+  /** Id of the in-flight stream; events with any other id are stale (from a
+      superseded stream after a doc switch or stop) and dropped. */
+  private activeStreamId: string | null = null;
   private unlisteners: UnlistenFn[] = [];
+  private listening = false;
 
   async init() {
     this.isConfigured = await api.hasApiKey(this.settings.provider);
+    if (this.listening) return; // re-init (e.g. remount): refresh key status only
+    this.listening = true;
     this.unlisteners = await Promise.all([
-      listen<string>("assistant:token", (e) => this.appendToken(e.payload)),
-      listen("assistant:done", () => {
+      listen<StreamToken>("assistant:token", (e) => {
+        if (e.payload.id === this.activeStreamId) this.appendToken(e.payload.text);
+      }),
+      listen<StreamDone>("assistant:done", (e) => {
+        if (e.payload.id !== this.activeStreamId) return;
+        this.activeStreamId = null;
         this.isStreaming = false;
         void this.persist();
       }),
-      listen<string>("assistant:error", (e) => {
-        this.messages = [...this.messages, { role: "assistant", content: `Error: ${e.payload}` }];
-        this.isStreaming = false;
-        void this.persist();
+      listen<StreamError>("assistant:error", (e) => {
+        // a matching done event follows and finishes the stream
+        if (e.payload.id !== this.activeStreamId) return;
+        this.messages = [
+          ...this.messages,
+          { role: "assistant", content: `Error: ${e.payload.message}` },
+        ];
       }),
     ]);
   }
@@ -69,6 +95,7 @@ class AssistantStore {
   destroy() {
     this.unlisteners.forEach((fn) => fn());
     this.unlisteners = [];
+    this.listening = false;
   }
 
   private appendToken(text: string) {
@@ -84,8 +111,10 @@ class AssistantStore {
     if (this.isStreaming) return;
     this.messages = [...this.messages, { role: "user", content: userMessage }];
     this.isStreaming = true;
+    this.activeStreamId = crypto.randomUUID();
     try {
       await api.sendAssistantMessage(
+        this.activeStreamId,
         this.settings.provider,
         this.settings.model || null,
         $state.snapshot(this.messages),
@@ -94,11 +123,16 @@ class AssistantStore {
     } catch (e) {
       this.messages = [...this.messages, { role: "assistant", content: `Error: ${e}` }];
       this.isStreaming = false;
+      this.activeStreamId = null;
     }
   }
 
   async stop() {
+    // drop the id first so events still in flight are ignored
+    this.activeStreamId = null;
+    this.isStreaming = false;
     await api.stopAssistant();
+    await this.persist();
   }
 
   clear() {

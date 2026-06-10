@@ -16,7 +16,9 @@ const MAX_TOKENS: u32 = 64_000;
 const KEYRING_SERVICE: &str = "com.adamwickwire.markdown";
 const DEV_KEYS_FILE: &str = "dev-keys.json";
 
-// Event names shared with the frontend assistant store.
+// Event names shared with the frontend assistant store. Every payload carries
+// the stream id the frontend generated for the request, so listeners can drop
+// events from a superseded stream (e.g. after switching documents mid-stream).
 const EVT_TOKEN: &str = "assistant:token";
 const EVT_DONE: &str = "assistant:done";
 const EVT_ERROR: &str = "assistant:error";
@@ -51,10 +53,11 @@ pub struct ChatMessage {
     pub content: String,
 }
 
-/// Tracks the in-flight streaming task so stop/new-message can cancel it.
+/// Tracks the in-flight streaming task (and its stream id) so
+/// stop/new-message can cancel it and report which stream ended.
 #[derive(Default)]
 pub struct AiState {
-    current: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    current: Mutex<Option<(String, tauri::async_runtime::JoinHandle<()>)>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -78,8 +81,13 @@ fn dev_keys_read(app: &AppHandle) -> Result<HashMap<String, String>> {
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let raw = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&raw).unwrap_or_default())
+    let raw = std::fs::read_to_string(&path)?;
+    serde_json::from_str(&raw).map_err(|e| {
+        Error::InvalidInput(format!(
+            "stored API keys are unreadable ({e}) — delete {} and re-enter them",
+            path.display()
+        ))
+    })
 }
 
 fn dev_keys_write(app: &AppHandle, keys: &HashMap<String, String>) -> Result<()> {
@@ -153,6 +161,7 @@ fn system_prompt(document_content: &str) -> String {
 pub fn start_stream(
     app: AppHandle,
     state: &AiState,
+    stream_id: String,
     provider: Provider,
     model: Option<String>,
     messages: Vec<ChatMessage>,
@@ -166,31 +175,37 @@ pub fn start_stream(
         .unwrap_or_else(|| provider.default_model().to_string());
 
     let mut current = state.current.lock().expect("ai mutex poisoned");
-    if let Some(handle) = current.take() {
+    if let Some((old_id, handle)) = current.take() {
         handle.abort();
+        let _ = app.emit(EVT_DONE, json!({ "id": old_id }));
     }
-    *current = Some(tauri::async_runtime::spawn(async move {
+    let task_app = app.clone();
+    let task_id = stream_id.clone();
+    let task = tauri::async_runtime::spawn(async move {
         let result = match provider {
             Provider::Anthropic => {
-                stream_anthropic(&app, &api_key, &model, messages, &document_content).await
+                stream_anthropic(&task_app, &task_id, &api_key, &model, messages, &document_content)
+                    .await
             }
             Provider::Openrouter => {
-                stream_openrouter(&app, &api_key, &model, messages, &document_content).await
+                stream_openrouter(&task_app, &task_id, &api_key, &model, messages, &document_content)
+                    .await
             }
         };
         if let Err(e) = result {
-            let _ = app.emit(EVT_ERROR, e.to_string());
+            let _ = task_app.emit(EVT_ERROR, json!({ "id": task_id, "message": e.to_string() }));
         }
-        let _ = app.emit(EVT_DONE, ());
-    }));
+        let _ = task_app.emit(EVT_DONE, json!({ "id": task_id }));
+    });
+    *current = Some((stream_id, task));
     Ok(())
 }
 
 pub fn stop_stream(app: &AppHandle, state: &AiState) {
-    if let Some(handle) = state.current.lock().expect("ai mutex poisoned").take() {
+    if let Some((id, handle)) = state.current.lock().expect("ai mutex poisoned").take() {
         handle.abort();
+        let _ = app.emit(EVT_DONE, json!({ "id": id }));
     }
-    let _ = app.emit(EVT_DONE, ());
 }
 
 /// Read SSE `data:` payloads from a response, calling `on_event` per payload.
@@ -229,6 +244,7 @@ async fn error_for_status(response: reqwest::Response, provider: &str) -> Result
 
 async fn stream_anthropic(
     app: &AppHandle,
+    stream_id: &str,
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
@@ -262,7 +278,7 @@ async fn stream_anthropic(
             Some("content_block_delta") => {
                 if event["delta"]["type"] == "text_delta" {
                     if let Some(text) = event["delta"]["text"].as_str() {
-                        let _ = app.emit(EVT_TOKEN, text);
+                        let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
                     }
                 }
             }
@@ -279,6 +295,7 @@ async fn stream_anthropic(
 
 async fn stream_openrouter(
     app: &AppHandle,
+    stream_id: &str,
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
@@ -320,7 +337,7 @@ async fn stream_openrouter(
         }
         if let Some(text) = event["choices"][0]["delta"]["content"].as_str() {
             if !text.is_empty() {
-                let _ = app.emit(EVT_TOKEN, text);
+                let _ = app.emit(EVT_TOKEN, json!({ "id": stream_id, "text": text }));
             }
         }
         Ok(())
