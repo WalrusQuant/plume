@@ -1,6 +1,6 @@
 <script lang="ts">
   import { confirm } from "@tauri-apps/plugin-dialog";
-  import type { DocType, Document, Folder } from "$lib/api";
+  import { api, type DocType, type Document, type Folder, type SearchHit } from "$lib/api";
   import { buildSidebarTree } from "$lib/buildSidebarTree";
   import { DOCUMENT_TYPES } from "$lib/documentTypes";
   import { MULTIPLY_TARGETS } from "$lib/multiplyTargets";
@@ -75,6 +75,34 @@
 
   const tree = $derived(buildSidebarTree(folders, documents));
   const moveDoc = $derived(documents.find((d) => d.id === moveDocId));
+
+  // Cross-document full-text search. Non-empty query replaces the tree with
+  // ranked results; debounced, with a sequence guard so out-of-order responses
+  // can't overwrite newer ones.
+  let searchQuery = $state("");
+  let searchResults = $state<SearchHit[]>([]);
+  let searchSeq = 0;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  const searching = $derived(searchQuery.trim().length > 0);
+
+  $effect(() => {
+    const q = searchQuery.trim();
+    clearTimeout(searchTimer);
+    if (!q) {
+      searchResults = [];
+      return;
+    }
+    const seq = ++searchSeq;
+    searchTimer = setTimeout(async () => {
+      try {
+        const hits = await api.searchDocuments(q);
+        if (seq === searchSeq) searchResults = hits;
+      } catch {
+        if (seq === searchSeq) searchResults = [];
+      }
+    }, 150);
+    return () => clearTimeout(searchTimer);
+  });
 
   function focusOnMount(node: HTMLInputElement) {
     node.focus();
@@ -327,6 +355,45 @@
     <span class="sidebar-brand-text">Plume</span>
   </div>
 
+  <div class="sidebar-search">
+    <svg class="sidebar-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+    <input
+      class="sidebar-search-input"
+      type="text"
+      placeholder="Search documents…"
+      bind:value={searchQuery}
+    />
+    {#if searching}
+      <button class="sidebar-search-clear" onclick={() => (searchQuery = "")} title="Clear search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    {/if}
+  </div>
+
+  {#if searching}
+    <nav class="sidebar-search-results">
+      {#each searchResults as hit (hit.id)}
+        <button class="sidebar-search-result" onclick={() => onSelect(hit.id)}>
+          <span class="sidebar-search-result-head">
+            <DocumentIcon type={hit.type} size={14} />
+            <span class="sidebar-search-result-name">{hit.name}</span>
+          </span>
+          {#if hit.snippet}
+            <span class="sidebar-search-result-snippet">{hit.snippet}</span>
+          {/if}
+        </button>
+      {/each}
+      {#if searchResults.length === 0}
+        <div class="sidebar-search-empty">No matches</div>
+      {/if}
+    </nav>
+  {:else}
   <div class="sidebar-section-header">
     <span class="sidebar-section-label">Inbox</span>
     <div class="sidebar-section-actions">
@@ -462,6 +529,7 @@
       </div>
     {/if}
   </nav>
+  {/if}
 
   {#if moveDocId && moveDoc}
     <MoveToFolderMenu
@@ -472,3 +540,97 @@
     />
   {/if}
 </aside>
+
+<style>
+  .sidebar-search {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0 0.5rem 0.5rem;
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-secondary);
+  }
+  .sidebar-search:focus-within {
+    border-color: var(--accent);
+  }
+  .sidebar-search-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+  .sidebar-search-input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    outline: none;
+  }
+  .sidebar-search-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .sidebar-search-clear:hover {
+    color: var(--text-primary);
+  }
+
+  .sidebar-search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0 0.5rem;
+    overflow-y: auto;
+  }
+  .sidebar-search-result {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    width: 100%;
+    padding: 0.45rem 0.55rem;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+  }
+  .sidebar-search-result:hover {
+    background: var(--bg-secondary);
+  }
+  .sidebar-search-result-head {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .sidebar-search-result-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sidebar-search-result-snippet {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .sidebar-search-empty {
+    padding: 0.6rem 0.55rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+</style>
