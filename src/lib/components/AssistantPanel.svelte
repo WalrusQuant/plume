@@ -59,9 +59,9 @@
   }
 
   /** Fetch each mentioned doc's body for the references payload. */
-  async function buildReferences(): Promise<DocReference[]> {
+  async function buildReferences(docs: Document[]): Promise<DocReference[]> {
     const refs: DocReference[] = [];
-    for (const m of mentions) {
+    for (const m of docs) {
       try {
         refs.push({ name: m.name, content: await api.getDocumentContent(m.id) });
       } catch (e) {
@@ -97,11 +97,14 @@
     e.preventDefault();
     const text = input.trim();
     if (!text || assistant.isStreaming) return;
-    const references = await buildReferences();
-    void assistant.send(text, getDocumentContent(), references);
+    // consume the input synchronously — a second Enter during the awaited
+    // reference fetch must be a no-op, not a silently dropped message
+    const pendingMentions = mentions;
     input = "";
     mentions = [];
     mentionQuery = null;
+    const references = await buildReferences(pendingMentions);
+    void assistant.send(text, getDocumentContent(), references);
   }
 
   function handleKeyDown(e: KeyboardEvent) {

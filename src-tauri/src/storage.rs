@@ -600,7 +600,10 @@ pub fn get_chat_messages(conn: &Connection, chat_id: &str) -> Result<Vec<StoredC
 }
 
 /// Replace the whole thread for a chat (simple + handles clear). Bumps the
-/// chat's `updated_at` so active chats sort to the top of the list.
+/// chat's `updated_at` so active chats sort to the top of the list — but only
+/// when something actually changed: merely opening a chat must not reorder the
+/// list or rewrite message timestamps. Rows whose role+content are unchanged
+/// keep their original `created_at`.
 pub fn save_chat_messages(
     conn: &mut Connection,
     chat_id: &str,
@@ -613,6 +616,41 @@ pub fn save_chat_messages(
     let Some(document_id) = document_id else {
         return Err(Error::NotFound("chat"));
     };
+
+    // Existing rows (with timestamps), in thread order.
+    let existing: Vec<(StoredChatMessage, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT role, content, input_tokens, output_tokens, created_at FROM chat_messages
+             WHERE chat_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt
+            .query_map([chat_id], |row| {
+                Ok((
+                    StoredChatMessage {
+                        role: row.get(0)?,
+                        content: row.get(1)?,
+                        input_tokens: row.get(2)?,
+                        output_tokens: row.get(3)?,
+                    },
+                    row.get(4)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows
+    };
+
+    let identical = |a: &StoredChatMessage, b: &StoredChatMessage| {
+        a.role == b.role
+            && a.content == b.content
+            && a.input_tokens == b.input_tokens
+            && a.output_tokens == b.output_tokens
+    };
+    if existing.len() == messages.len()
+        && existing.iter().zip(messages).all(|((e, _), m)| identical(e, m))
+    {
+        return Ok(()); // nothing changed — leave timestamps and sort order alone
+    }
+
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM chat_messages WHERE chat_id = ?1", [chat_id])?;
     let ts = now();
@@ -622,7 +660,13 @@ pub fn save_chat_messages(
                 (document_id, chat_id, role, content, input_tokens, output_tokens, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
-        for msg in messages {
+        for (i, msg) in messages.iter().enumerate() {
+            // same message at the same position (token updates don't count as
+            // a different message) → keep its original timestamp
+            let created_at = existing
+                .get(i)
+                .filter(|(e, _)| e.role == msg.role && e.content == msg.content)
+                .map_or(ts.as_str(), |(_, t)| t.as_str());
             stmt.execute(rusqlite::params![
                 document_id,
                 chat_id,
@@ -630,7 +674,7 @@ pub fn save_chat_messages(
                 msg.content,
                 msg.input_tokens,
                 msg.output_tokens,
-                ts
+                created_at
             ])?;
         }
     }
@@ -1080,6 +1124,52 @@ mod tests {
         let chats: i64 = conn.query_row("SELECT COUNT(*) FROM chats", [], |r| r.get(0)).unwrap();
         assert_eq!(msgs, 0);
         assert_eq!(chats, 0);
+    }
+
+    #[test]
+    fn resave_identical_thread_is_a_noop_and_appends_keep_timestamps() {
+        let mut conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, None).unwrap();
+        let chat = create_chat(&conn, &doc.id, Some("A")).unwrap();
+        let thread = vec![msg("user", "hi"), msg("assistant", "hello")];
+        save_chat_messages(&mut conn, &chat.id, &thread).unwrap();
+
+        let stamps = |conn: &Connection| -> Vec<String> {
+            let mut stmt = conn
+                .prepare("SELECT created_at FROM chat_messages WHERE chat_id = ?1 ORDER BY id")
+                .unwrap();
+            let v = stmt
+                .query_map([&chat.id], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap();
+            v
+        };
+        let created = stamps(&conn);
+        let updated: String = conn
+            .query_row("SELECT updated_at FROM chats WHERE id = ?1", [&chat.id], |r| r.get(0))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        // re-saving the identical thread (e.g. just opening the chat) must not
+        // bump updated_at (sort order) or rewrite created_at
+        save_chat_messages(&mut conn, &chat.id, &thread).unwrap();
+        let updated_after: String = conn
+            .query_row("SELECT updated_at FROM chats WHERE id = ?1", [&chat.id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(updated, updated_after);
+        assert_eq!(created, stamps(&conn));
+
+        // appending a message keeps the existing rows' timestamps and bumps the chat
+        let mut longer = thread.clone();
+        longer.push(msg("user", "more"));
+        save_chat_messages(&mut conn, &chat.id, &longer).unwrap();
+        let after_append = stamps(&conn);
+        assert_eq!(&after_append[..2], &created[..]);
+        let updated_append: String = conn
+            .query_row("SELECT updated_at FROM chats WHERE id = ?1", [&chat.id], |r| r.get(0))
+            .unwrap();
+        assert_ne!(updated, updated_append);
     }
 
     #[test]

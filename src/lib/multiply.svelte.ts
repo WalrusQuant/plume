@@ -21,6 +21,8 @@ interface StreamToken {
 }
 interface StreamDone {
   id: string;
+  /** True when the stream was aborted (superseded by another AI action). */
+  aborted?: boolean;
 }
 interface StreamError {
   id: string;
@@ -49,6 +51,12 @@ class MultiplyController {
       }),
       listen<StreamDone>("assistant:done", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
+        if (e.payload.aborted) {
+          // another AI action took the stream slot — the draft is truncated,
+          // never save it as a document
+          this.fail(new Error("generation was interrupted by another AI action"));
+          return;
+        }
         this.finish(this.streamed.trim());
       }),
       listen<StreamError>("assistant:error", (e) => {

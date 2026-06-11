@@ -423,7 +423,9 @@ fn run_stream(
     let mut current = state.current.lock().expect("ai mutex poisoned");
     if let Some((old_id, handle)) = current.take() {
         handle.abort();
-        let _ = app.emit(EVT_DONE, json!({ "id": old_id }));
+        // `aborted` tells listeners this is NOT a successful completion — the
+        // text they have is truncated and must not be treated as a result.
+        let _ = app.emit(EVT_DONE, json!({ "id": old_id, "aborted": true }));
     }
     let task_app = app.clone();
     let task_id = stream_id.clone();
@@ -448,8 +450,27 @@ fn run_stream(
 pub fn stop_stream(app: &AppHandle, state: &AiState) {
     if let Some((id, handle)) = state.current.lock().expect("ai mutex poisoned").take() {
         handle.abort();
-        let _ = app.emit(EVT_DONE, json!({ "id": id }));
+        let _ = app.emit(EVT_DONE, json!({ "id": id, "aborted": true }));
     }
+}
+
+/// Drain complete lines (terminated by '\n') from a byte buffer, passing each
+/// `data: ` payload to `on_data`. The buffer holds raw bytes — decoding only
+/// complete lines means a multi-byte UTF-8 character split across two network
+/// chunks is decoded whole instead of becoming U+FFFD replacement characters
+/// (which v2 would persist into documents via expand/multiply).
+fn drain_sse_lines(
+    buffer: &mut Vec<u8>,
+    on_data: &mut impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+        let line: Vec<u8> = buffer.drain(..=pos).collect();
+        let line = String::from_utf8_lossy(&line);
+        if let Some(data) = line.trim_end().strip_prefix("data: ") {
+            on_data(data)?;
+        }
+    }
+    Ok(())
 }
 
 /// Read SSE `data:` payloads from a response, calling `on_event` per payload.
@@ -458,17 +479,11 @@ async fn for_each_sse_data(
     mut on_event: impl FnMut(&str) -> Result<()>,
 ) -> Result<()> {
     let mut stream = response.bytes_stream();
-    let mut buffer = String::new();
+    let mut buffer: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| Error::InvalidInput(format!("stream error: {e}")))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(pos) = buffer.find('\n') {
-            let line = buffer[..pos].trim_end().to_string();
-            buffer.drain(..=pos);
-            if let Some(data) = line.strip_prefix("data: ") {
-                on_event(data)?;
-            }
-        }
+        buffer.extend_from_slice(&chunk);
+        drain_sse_lines(&mut buffer, &mut on_event)?;
     }
     Ok(())
 }
@@ -558,6 +573,17 @@ async fn stream_sse(
     Ok(())
 }
 
+/// Whether an Anthropic model accepts `"thinking": {"type": "adaptive"}`.
+/// Adaptive thinking exists on Opus 4.6+, Sonnet 4.6, and the Fable/Mythos 5
+/// family; Haiku 4.5 (our `fast_model`) and older models 400 on it, so the
+/// thinking field is omitted entirely for them (omitting is valid everywhere).
+/// Verified 2026-06-11 against the claude-api skill.
+fn supports_adaptive_thinking(model: &str) -> bool {
+    ["claude-fable-5", "claude-mythos-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6"]
+        .iter()
+        .any(|m| model.starts_with(m))
+}
+
 async fn stream_anthropic(
     app: &AppHandle,
     stream_id: &str,
@@ -566,14 +592,16 @@ async fn stream_anthropic(
     messages: Vec<ChatMessage>,
     system: &str,
 ) -> Result<()> {
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "max_tokens": MAX_TOKENS,
         "system": system,
         "messages": messages,
-        "thinking": {"type": "adaptive"},
         "stream": true,
     });
+    if supports_adaptive_thinking(model) {
+        body["thinking"] = json!({"type": "adaptive"});
+    }
     let request = reqwest::Client::new()
         .post(ANTHROPIC_URL)
         .header("x-api-key", api_key)
@@ -632,8 +660,8 @@ async fn stream_openrouter(
         .post(OPENROUTER_URL)
         .header("authorization", format!("Bearer {api_key}"))
         .header("content-type", "application/json")
-        .header("http-referer", "https://github.com/adamwickwire/markdown")
-        .header("x-title", "Markdown")
+        .header("http-referer", "https://github.com/WalrusQuant/plume")
+        .header("x-title", "Plume")
         .json(&body);
 
     stream_sse(app, stream_id, "OpenRouter", request, |event| {
@@ -657,6 +685,53 @@ async fn stream_openrouter(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adaptive_thinking_gated_by_model() {
+        // strong-tier models accept adaptive thinking…
+        assert!(supports_adaptive_thinking("claude-opus-4-8"));
+        assert!(supports_adaptive_thinking("claude-sonnet-4-6"));
+        assert!(supports_adaptive_thinking("claude-fable-5"));
+        // …but Haiku (the fast_model fallback) and older models 400 on it
+        assert!(!supports_adaptive_thinking(Provider::Anthropic.fast_model()));
+        assert!(!supports_adaptive_thinking("claude-haiku-4-5-20251001"));
+        assert!(!supports_adaptive_thinking("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn sse_multibyte_char_split_across_chunks_decodes_whole() {
+        // "é" is 0xC3 0xA9 — split it across two network chunks
+        let payload = "data: é\n".as_bytes();
+        let mut buffer: Vec<u8> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
+        buffer.extend_from_slice(&payload[..7]); // ends mid-character
+        drain_sse_lines(&mut buffer, &mut |d| {
+            seen.push(d.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert!(seen.is_empty(), "incomplete line must stay buffered");
+        buffer.extend_from_slice(&payload[7..]);
+        drain_sse_lines(&mut buffer, &mut |d| {
+            seen.push(d.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, vec!["é"]);
+    }
+
+    #[test]
+    fn sse_multiple_lines_in_one_chunk() {
+        let mut buffer = b"data: one\n\ndata: two\nleftover".to_vec();
+        let mut seen: Vec<String> = Vec::new();
+        let mut on_data = |d: &str| {
+            seen.push(d.to_string());
+            Ok(())
+        };
+        drain_sse_lines(&mut buffer, &mut on_data).unwrap();
+        assert_eq!(seen, vec!["one", "two"]);
+        assert_eq!(buffer, b"leftover");
+    }
 
     #[test]
     fn fast_model_is_haiku_tier() {

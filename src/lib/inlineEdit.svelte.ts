@@ -8,7 +8,6 @@ import {
   type Tooltip,
 } from "@codemirror/view";
 import {
-  Compartment,
   EditorState,
   Prec,
   StateEffect,
@@ -25,10 +24,11 @@ import { toast } from "$lib/toast.svelte";
 // streamed replacement previewed in place → Accept / Reject.
 //
 // One CM6 file: a StateField holds the edit state, decorations dim the original
-// and stream the replacement in a block widget, a tooltip renders the menu, a
-// Compartment locks the editor while streaming. The controller singleton drives
-// it and owns the Tauri event plumbing. Reuses the chat `assistant:*` events
-// (filtered by stream id) — see ai.rs::start_inline_stream.
+// and stream the replacement in a block widget, a tooltip renders the menu, and
+// a readOnly facet derived from the field locks the editor while an edit is
+// active. The controller singleton drives it and owns the Tauri event plumbing.
+// Reuses the chat `assistant:*` events (filtered by stream id) — see
+// ai.rs::start_inline_stream.
 // ---------------------------------------------------------------------------
 
 // The menu shows whenever there's a non-empty selection and we're idle, so it
@@ -51,8 +51,9 @@ const ieField = StateField.define<IEState>({
   create: () => IDLE,
   update(value, tr) {
     let v = value;
-    // a doc change while active is our own Accept dispatch (the editor is
-    // read-only otherwise) — clear the preview.
+    // any doc change while active — our own Accept dispatch, History →
+    // Restore, or the chat panel's Insert/Replace — cancels the edit
+    // (cancelOnDocChange notifies the controller to abort a live stream).
     if (tr.docChanged && v.phase !== "idle") v = IDLE;
     for (const e of tr.effects) {
       if (e.is(setState)) v = e.value ? { ...v, ...e.value } : IDLE;
@@ -61,8 +62,22 @@ const ieField = StateField.define<IEState>({
   },
 });
 
-/** Locked while streaming/reviewing so the user can't edit the pending range. */
-const readOnlyComp = new Compartment();
+/** Locked while streaming/reviewing so the user can't edit the pending range.
+    Derived from the field (not a compartment) so EVERY path that resets the
+    field — accept, reject, or an external doc change — also unlocks; there is
+    no separate unlock step to forget. */
+const readOnlyWhileActive = EditorState.readOnly.from(ieField, (v) => v.phase !== "idle");
+
+/** A doc change while an edit is active resets ieField to IDLE (the field's
+    own update handles that). readOnly blocks typing but not programmatic
+    dispatches — History → Restore and the chat panel's Insert / Replace still
+    land — so tell the controller to abort an in-flight stream instead of
+    leaving it orphaned. */
+const cancelOnDocChange = EditorView.updateListener.of((update) => {
+  if (update.docChanged && update.startState.field(ieField).phase !== "idle") {
+    inlineEdit.onDocChanged();
+  }
+});
 
 // ----- menu tooltip --------------------------------------------------------
 
@@ -226,7 +241,8 @@ export const inlineEditExtension: Extension = [
   ieField,
   tooltipField,
   decoField,
-  readOnlyComp.of([]),
+  readOnlyWhileActive,
+  cancelOnDocChange,
   inlineEditKeymap,
 ];
 
@@ -238,6 +254,8 @@ interface StreamToken {
 }
 interface StreamDone {
   id: string;
+  /** True when the stream was aborted (superseded by another AI action). */
+  aborted?: boolean;
 }
 interface StreamError {
   id: string;
@@ -267,6 +285,14 @@ class InlineEditController {
       listen<StreamDone>("assistant:done", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
         this.activeStreamId = null;
+        if (e.payload.aborted) {
+          // superseded by another AI action — the streamed text is truncated,
+          // discard it instead of presenting it for review
+          this.streamed = "";
+          toast.error("Inline edit was cancelled by another AI action.");
+          this.view?.dispatch({ effects: setState.of(null) });
+          return;
+        }
         this.view?.dispatch({ effects: setState.of({ phase: "review" }) });
       }),
       listen<StreamError>("assistant:error", (e) => {
@@ -311,11 +337,9 @@ class InlineEditController {
     this.streamed = "";
     this.activeStreamId = crypto.randomUUID();
     const selectedText = view.state.sliceDoc(sel.from, sel.to);
+    // entering "streaming" also locks the editor via the readOnly facet
     view.dispatch({
-      effects: [
-        setState.of({ phase: "streaming", from: sel.from, to: sel.to, streamed: "" }),
-        readOnlyComp.reconfigure(EditorState.readOnly.of(true)),
-      ],
+      effects: setState.of({ phase: "streaming", from: sel.from, to: sel.to, streamed: "" }),
     });
     // Honor the user's selected model (falls back to the provider's fast
     // Haiku-tier model only when none is set).
@@ -340,38 +364,58 @@ class InlineEditController {
     this.view?.dispatch({ effects: setState.of({ streamed: this.streamed }) });
   }
 
+  /** Guards accept() against a double-click: the snapshot await between the
+      phase check and the dispatch leaves a window where the field is still
+      "review" and a second call would splice the replacement twice. */
+  private accepting = false;
+
   /** Apply the replacement: snapshot, then splice it in via dispatch. */
   async accept(view: EditorView) {
     const ie = view.state.field(ieField);
-    if (ie.phase !== "review" && ie.phase !== "streaming") return;
-    const replacement = this.streamed;
-    this.activeStreamId = null;
-    if (this.docId) {
-      try {
-        await api.createSnapshot(this.docId, this.getContent(), "ai-edit");
-      } catch (e) {
-        toast.error(`Snapshot failed: ${e}`);
+    if (this.accepting || (ie.phase !== "review" && ie.phase !== "streaming")) return;
+    this.accepting = true;
+    try {
+      const replacement = this.streamed;
+      this.activeStreamId = null;
+      if (this.docId) {
+        try {
+          await api.createSnapshot(this.docId, this.getContent(), "ai-edit");
+        } catch (e) {
+          toast.error(`Snapshot failed: ${e}`);
+        }
       }
+      // dispatch drives the editor's updateListener (save + preview); the doc
+      // change resets ieField to idle, which unlocks via the readOnly facet
+      view.dispatch({
+        changes: { from: ie.from, to: ie.to, insert: replacement },
+        selection: { anchor: ie.from + replacement.length },
+      });
+      this.streamed = "";
+      this.onAccepted?.();
+    } finally {
+      this.accepting = false;
     }
-    // dispatch drives the editor's updateListener (save + preview); the doc
-    // change resets ieField to idle and we unlock in the same transaction
-    view.dispatch({
-      changes: { from: ie.from, to: ie.to, insert: replacement },
-      selection: { anchor: ie.from + replacement.length },
-      effects: readOnlyComp.reconfigure([]),
-    });
-    this.streamed = "";
-    this.onAccepted?.();
   }
 
-  /** Discard the preview, abort any stream, unlock the editor. */
+  /** Discard the preview and abort any stream (the field reset unlocks). */
   reject(view?: EditorView) {
     const v = view ?? this.view;
     const wasStreaming = this.activeStreamId !== null;
     this.activeStreamId = null;
     this.streamed = "";
     if (wasStreaming) void api.stopAssistant();
-    v?.dispatch({ effects: [setState.of(null), readOnlyComp.reconfigure([])] });
+    v?.dispatch({ effects: setState.of(null) });
+  }
+
+  /** The document changed under an active edit (restore, chat Insert/Replace,
+      or our own accept). The field has already reset itself; abort a stream
+      that would otherwise keep running with nowhere to land. */
+  onDocChanged() {
+    if (this.activeStreamId) {
+      this.activeStreamId = null;
+      void api.stopAssistant();
+    }
+    this.streamed = "";
   }
 }
 

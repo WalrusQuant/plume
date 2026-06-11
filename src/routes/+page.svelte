@@ -286,7 +286,9 @@
     const firstLine = content.split("\n").find((l) => l.trim()) ?? "";
     const cleaned = firstLine.replace(/^#+\s*/, "").trim();
     if (!cleaned) return "New idea";
-    return cleaned.length > 40 ? `${cleaned.slice(0, 40)}…` : cleaned;
+    // slice by code points so an emoji at the boundary isn't split in half
+    const points = [...cleaned];
+    return points.length > 40 ? `${points.slice(0, 40).join("")}…` : cleaned;
   }
 
   /** "+ New idea": open the capture modal. No row is created until save. */
@@ -398,12 +400,17 @@
     const baseName = source.name;
     const sourceId = source.id;
 
-    // Resolve the target folder.
+    // The target folder is created lazily, on the first draft that succeeds —
+    // a run where every generation fails (no network, bad key) must not leave
+    // the source relocated into a new folder as a side effect.
     let folderId = source.folderId;
-    if (!folderId) {
-      const folder = await api.createFolder(baseName);
-      folderId = folder.id;
-      await api.moveDocument(sourceId, folderId);
+    async function ensureFolder(): Promise<string> {
+      if (!folderId) {
+        const folder = await api.createFolder(baseName);
+        folderId = folder.id;
+        await api.moveDocument(sourceId, folderId);
+      }
+      return folderId;
     }
 
     multiplyProgress = targets.map((t) => ({ ...t, status: "pending" }));
@@ -413,8 +420,9 @@
       try {
         // awaited → strictly sequential, honoring the single AiState slot
         const draft = await multiply.generate(sourceText, targets[i].type, targets[i].label);
+        const targetFolder = await ensureFolder();
         const doc = await api.createDocument(`${baseName} — ${targets[i].label}`, targets[i].type, draft);
-        await api.moveDocument(doc.id, folderId);
+        await api.moveDocument(doc.id, targetFolder);
         multiplyProgress[i].status = "done";
       } catch (e) {
         multiplyProgress[i].status = "error";
@@ -440,6 +448,7 @@
   async function deleteDocument(id: string) {
     await api.deleteDocument(id);
     pendingSaves.delete(id); // never retry a save against a deleted row
+    lastSnapshotAt.delete(id);
     documents = documents.filter((d) => d.id !== id);
     // if the deleted idea is open in the capture modal, close it
     if (ideaModalId === id) ideaModalOpen = false;
