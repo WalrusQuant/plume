@@ -112,8 +112,23 @@ pub fn rename_folder(db: State<Db>, id: String, name: String) -> Result<Folder> 
 }
 
 #[tauri::command]
+pub fn set_folder_active(db: State<Db>, id: String, active: bool) -> Result<Folder> {
+    db.with(|conn| storage::set_folder_active(conn, &id, active))
+}
+
+#[tauri::command]
 pub fn delete_folder(db: State<Db>, id: String) -> Result<()> {
     db.with(|conn| storage::delete_folder(conn, &id))
+}
+
+#[tauri::command]
+pub fn reorder_documents(db: State<Db>, ids: Vec<String>) -> Result<()> {
+    db.with(|conn| storage::reorder_documents(conn, &ids))
+}
+
+#[tauri::command]
+pub fn reorder_folders(db: State<Db>, ids: Vec<String>) -> Result<()> {
+    db.with(|conn| storage::reorder_folders(conn, &ids))
 }
 
 #[tauri::command]
