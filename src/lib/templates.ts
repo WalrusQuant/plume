@@ -200,6 +200,49 @@ Steps to undo if something goes wrong.
 | Escalation | | |
 `;
 
+const planTemplate = `# Plan: [What you're building]
+
+## Why
+
+The itch you're scratching, and who it's for. One paragraph.
+
+## Shape of done
+
+What exists when this is finished — an outcome, not a task list.
+
+## Steps
+
+Rough order, not a contract.
+
+1.
+2.
+3.
+
+## Worth writing about
+
+Moments in this build that could become posts.
+
+-
+`;
+
+const buildLogTemplate = `# Build log: [Project]
+
+Add a new dated section per session — this file is the raw ore your posts
+are mined from.
+
+---
+
+## YYYY-MM-DD
+
+**Did:**
+
+**Hit:**
+
+**Learned:**
+
+**Post-worthy:**
+`;
+
 const templates: Record<DocType, string> = {
   "blog-post": blogPostTemplate,
   newsletter: newsletterTemplate,
@@ -209,6 +252,8 @@ const templates: Record<DocType, string> = {
   "claude-md": claudeMdTemplate,
   "system-prompt": systemPromptTemplate,
   runbook: runbookTemplate,
+  plan: planTemplate,
+  "build-log": buildLogTemplate,
   idea: "",
   generic: "",
 };

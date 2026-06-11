@@ -17,6 +17,8 @@ pub enum DocType {
     ClaudeMd,
     SystemPrompt,
     Runbook,
+    Plan,
+    BuildLog,
     Idea,
     Generic,
 }
@@ -32,6 +34,8 @@ impl DocType {
             DocType::ClaudeMd => "claude-md",
             DocType::SystemPrompt => "system-prompt",
             DocType::Runbook => "runbook",
+            DocType::Plan => "plan",
+            DocType::BuildLog => "build-log",
             DocType::Idea => "idea",
             DocType::Generic => "generic",
         }
@@ -47,6 +51,8 @@ impl DocType {
             "claude-md" => Ok(DocType::ClaudeMd),
             "system-prompt" => Ok(DocType::SystemPrompt),
             "runbook" => Ok(DocType::Runbook),
+            "plan" => Ok(DocType::Plan),
+            "build-log" => Ok(DocType::BuildLog),
             "idea" => Ok(DocType::Idea),
             "generic" => Ok(DocType::Generic),
             other => Err(Error::InvalidInput(format!("unknown document type: {other}"))),
@@ -69,6 +75,10 @@ pub struct Document {
     /// and may be auto-updated. The two states are mutually exclusive, so
     /// auto-derivation can never clobber a manual title.
     pub title_explicit: bool,
+    /// Manual position within its sidebar section (folder docs / unfiled /
+    /// Inbox). Lower sorts first. Independent of `updated_at` so reordering
+    /// never disturbs recency-based views (shelf Recent, project freshness).
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,6 +89,11 @@ pub struct Folder {
     pub parent_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Shelf curation: active projects sit on top, resting ones collapse
+    /// below. This is the entire "planner" — no statuses beyond it.
+    pub active: bool,
+    /// Manual position among the folders. Lower sorts first; new folders append.
+    pub sort_order: i64,
 }
 
 /// Why a document snapshot was captured. Stored as its kebab-case string;
@@ -205,6 +220,25 @@ const MIGRATIONS: &[&str] = &[
     );
     INSERT INTO documents_fts (id, name, content)
         SELECT id, name, content FROM documents;",
+    // v7 — project active flag (the shelf's only curation: active on top,
+    // resting below). Defaults to active so an upgraded shelf isn't empty.
+    "ALTER TABLE folders ADD COLUMN active INTEGER NOT NULL DEFAULT 1;",
+    // v8 — manual sort order for the sidebar/shelf. Backfill preserves the
+    // existing implicit order exactly: documents ranked by updated_at DESC,
+    // folders by name (NOCASE). A rowid tiebreak keeps rows with equal keys
+    // from sharing a rank (which would make the manual order ambiguous).
+    "ALTER TABLE documents ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+     UPDATE documents SET sort_order = (
+        SELECT COUNT(*) FROM documents d2
+        WHERE d2.updated_at > documents.updated_at
+           OR (d2.updated_at = documents.updated_at AND d2.rowid < documents.rowid)
+     );
+     ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+     UPDATE folders SET sort_order = (
+        SELECT COUNT(*) FROM folders f2
+        WHERE f2.name < folders.name COLLATE NOCASE
+           OR (f2.name = folders.name COLLATE NOCASE AND f2.rowid < folders.rowid)
+     );",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -250,10 +284,12 @@ fn document_from_row(row: &Row) -> rusqlite::Result<Document> {
         created_at: row.get(4)?,
         updated_at: row.get(5)?,
         title_explicit: row.get(6)?,
+        sort_order: row.get(7)?,
     })
 }
 
-const DOC_COLUMNS: &str = "id, name, type, folder_id, created_at, updated_at, title_explicit";
+const DOC_COLUMNS: &str =
+    "id, name, type, folder_id, created_at, updated_at, title_explicit, sort_order";
 
 fn get_document(conn: &Connection, id: &str) -> Result<Document> {
     conn.query_row(
@@ -305,8 +341,9 @@ pub fn create_document(
     let id = uuid::Uuid::new_v4().to_string();
     let ts = now();
     conn.execute(
-        "INSERT INTO documents (id, name, type, folder_id, content, created_at, updated_at)
-         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?5)",
+        "INSERT INTO documents (id, name, type, folder_id, content, created_at, updated_at, sort_order)
+         VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?5,
+                 COALESCE((SELECT MIN(sort_order) FROM documents), 1) - 1)",
         rusqlite::params![
             id,
             name,
@@ -386,14 +423,34 @@ pub fn move_document(conn: &Connection, id: &str, folder_id: Option<&str>) -> Re
             return Err(Error::NotFound("folder"));
         }
     }
+    // Land at the top of the destination section: a stale sort_order from the
+    // old folder would otherwise drop it into an arbitrary mid-list position.
     let changed = conn.execute(
-        "UPDATE documents SET folder_id = ?2, updated_at = ?3 WHERE id = ?1",
+        "UPDATE documents SET folder_id = ?2, updated_at = ?3,
+                sort_order = COALESCE((SELECT MIN(sort_order) FROM documents), 1) - 1
+         WHERE id = ?1",
         rusqlite::params![id, folder_id, now()],
     )?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
     get_document(conn, id)
+}
+
+/// Apply a manual ordering to documents: each id's `sort_order` becomes its
+/// index in `ids`. Reorder-only — never touches `updated_at` (reordering must
+/// not pollute recency views). Unknown ids are silently skipped (a 0-row
+/// UPDATE) so a benign race against a concurrent delete can't fail the drop.
+pub fn reorder_documents(conn: &Connection, ids: &[String]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE documents SET sort_order = ?2 WHERE id = ?1",
+            rusqlite::params![id, i as i64],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn delete_document(conn: &Connection, id: &str) -> Result<()> {
@@ -775,14 +832,17 @@ fn folder_from_row(row: &Row) -> rusqlite::Result<Folder> {
         parent_id: row.get(2)?,
         created_at: row.get(3)?,
         updated_at: row.get(4)?,
+        active: row.get(5)?,
+        sort_order: row.get(6)?,
     })
 }
 
-const FOLDER_COLUMNS: &str = "id, name, parent_id, created_at, updated_at";
+const FOLDER_COLUMNS: &str = "id, name, parent_id, created_at, updated_at, active, sort_order";
 
 pub fn list_folders(conn: &Connection) -> Result<Vec<Folder>> {
+    // Manual order; name is only the tiebreak for the backfilled defaults.
     let mut stmt = conn.prepare(&format!(
-        "SELECT {FOLDER_COLUMNS} FROM folders ORDER BY name COLLATE NOCASE"
+        "SELECT {FOLDER_COLUMNS} FROM folders ORDER BY sort_order, name COLLATE NOCASE"
     ))?;
     let folders = stmt
         .query_map([], folder_from_row)?
@@ -795,8 +855,9 @@ pub fn create_folder(conn: &Connection, name: &str) -> Result<Folder> {
     let id = uuid::Uuid::new_v4().to_string();
     let ts = now();
     conn.execute(
-        "INSERT INTO folders (id, name, parent_id, created_at, updated_at)
-         VALUES (?1, ?2, NULL, ?3, ?3)",
+        "INSERT INTO folders (id, name, parent_id, created_at, updated_at, sort_order)
+         VALUES (?1, ?2, NULL, ?3, ?3,
+                 COALESCE((SELECT MAX(sort_order) FROM folders), -1) + 1)",
         rusqlite::params![id, name, ts],
     )?;
     conn.query_row(
@@ -824,11 +885,42 @@ pub fn rename_folder(conn: &Connection, id: &str, name: &str) -> Result<Folder> 
     .map_err(Into::into)
 }
 
+pub fn set_folder_active(conn: &Connection, id: &str, active: bool) -> Result<Folder> {
+    let changed = conn.execute(
+        "UPDATE folders SET active = ?2, updated_at = ?3 WHERE id = ?1",
+        rusqlite::params![id, active, now()],
+    )?;
+    if changed == 0 {
+        return Err(Error::NotFound("folder"));
+    }
+    conn.query_row(
+        &format!("SELECT {FOLDER_COLUMNS} FROM folders WHERE id = ?1"),
+        [id],
+        folder_from_row,
+    )
+    .map_err(Into::into)
+}
+
 pub fn delete_folder(conn: &Connection, id: &str) -> Result<()> {
     let changed = conn.execute("DELETE FROM folders WHERE id = ?1", [id])?;
     if changed == 0 {
         return Err(Error::NotFound("folder"));
     }
+    Ok(())
+}
+
+/// Apply a manual ordering to folders: each id's `sort_order` becomes its index
+/// in `ids`. Mirrors `reorder_documents` — never touches `updated_at`, ignores
+/// unknown ids.
+pub fn reorder_folders(conn: &Connection, ids: &[String]) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute(
+            "UPDATE folders SET sort_order = ?2 WHERE id = ?1",
+            rusqlite::params![id, i as i64],
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 
@@ -1034,6 +1126,32 @@ mod tests {
         let doc = create_document(&conn, "Draft", None, None).unwrap();
         let err = move_document(&conn, &doc.id, Some("nope")).unwrap_err();
         assert!(matches!(err, Error::NotFound("folder")));
+    }
+
+    #[test]
+    fn create_folder_defaults_active() {
+        let conn = test_conn();
+        let folder = create_folder(&conn, "Posts").unwrap();
+        assert!(folder.active);
+        assert!(list_folders(&conn).unwrap()[0].active);
+    }
+
+    #[test]
+    fn set_folder_active_toggles() {
+        let conn = test_conn();
+        let folder = create_folder(&conn, "Posts").unwrap();
+
+        let rested = set_folder_active(&conn, &folder.id, false).unwrap();
+        assert!(!rested.active);
+        assert!(!list_folders(&conn).unwrap()[0].active);
+
+        let woken = set_folder_active(&conn, &folder.id, true).unwrap();
+        assert!(woken.active);
+
+        assert!(matches!(
+            set_folder_active(&conn, "nope", true).unwrap_err(),
+            Error::NotFound("folder")
+        ));
     }
 
     #[test]
@@ -1300,6 +1418,8 @@ mod tests {
             DocType::ClaudeMd,
             DocType::SystemPrompt,
             DocType::Runbook,
+            DocType::Plan,
+            DocType::BuildLog,
             DocType::Idea,
             DocType::Generic,
         ] {
@@ -1307,5 +1427,133 @@ mod tests {
             let json = serde_json::to_string(&t).unwrap();
             assert_eq!(json, format!("\"{}\"", t.as_str()));
         }
+    }
+
+    /// sort_order of a document by id (via the public list).
+    fn doc_order(conn: &Connection, id: &str) -> i64 {
+        list_documents(conn).unwrap().into_iter().find(|d| d.id == id).unwrap().sort_order
+    }
+
+    #[test]
+    fn reorder_documents_assigns_positions() {
+        let conn = test_conn();
+        let a = create_document(&conn, "A", None, None).unwrap();
+        let b = create_document(&conn, "B", None, None).unwrap();
+        let c = create_document(&conn, "C", None, None).unwrap();
+
+        reorder_documents(&conn, &[c.id.clone(), a.id.clone(), b.id.clone()]).unwrap();
+        assert_eq!(doc_order(&conn, &c.id), 0);
+        assert_eq!(doc_order(&conn, &a.id), 1);
+        assert_eq!(doc_order(&conn, &b.id), 2);
+    }
+
+    #[test]
+    fn reorder_ignores_unknown_ids() {
+        let conn = test_conn();
+        let a = create_document(&conn, "A", None, None).unwrap();
+        // a stale/unknown id (e.g. deleted mid-drag) must not error; the known
+        // id still lands at its index
+        reorder_documents(&conn, &["ghost".into(), a.id.clone()]).unwrap();
+        assert_eq!(doc_order(&conn, &a.id), 1);
+    }
+
+    #[test]
+    fn reorder_does_not_touch_updated_at() {
+        let conn = test_conn();
+        let a = create_document(&conn, "A", None, None).unwrap();
+        let b = create_document(&conn, "B", None, None).unwrap();
+        let stamp = |id: &str| {
+            list_documents(&conn).unwrap().into_iter().find(|d| d.id == id).unwrap().updated_at
+        };
+        let (ua, ub) = (stamp(&a.id), stamp(&b.id));
+
+        reorder_documents(&conn, &[b.id.clone(), a.id.clone()]).unwrap();
+        assert_eq!(stamp(&a.id), ua);
+        assert_eq!(stamp(&b.id), ub);
+    }
+
+    #[test]
+    fn create_document_lands_at_top() {
+        let conn = test_conn();
+        let a = create_document(&conn, "A", None, None).unwrap();
+        let b = create_document(&conn, "B", None, None).unwrap();
+        // normalize to 0..n so "above the top" is unambiguous
+        reorder_documents(&conn, &[a.id.clone(), b.id.clone()]).unwrap();
+        let c = create_document(&conn, "C", None, None).unwrap();
+        assert!(doc_order(&conn, &c.id) < doc_order(&conn, &a.id));
+    }
+
+    #[test]
+    fn move_document_lands_at_top() {
+        let conn = test_conn();
+        let folder = create_folder(&conn, "F").unwrap();
+        let a = create_document(&conn, "A", None, None).unwrap();
+        let b = create_document(&conn, "B", None, None).unwrap();
+        reorder_documents(&conn, &[a.id.clone(), b.id.clone()]).unwrap(); // a=0, b=1
+
+        move_document(&conn, &b.id, Some(&folder.id)).unwrap();
+        assert!(doc_order(&conn, &b.id) < doc_order(&conn, &a.id));
+    }
+
+    #[test]
+    fn list_folders_uses_manual_order() {
+        let conn = test_conn();
+        let a = create_folder(&conn, "Alpha").unwrap();
+        let b = create_folder(&conn, "Beta").unwrap();
+        let c = create_folder(&conn, "Gamma").unwrap();
+        // new folders append → creation order
+        let names = |conn: &Connection| -> Vec<String> {
+            list_folders(conn).unwrap().into_iter().map(|f| f.name).collect()
+        };
+        assert_eq!(names(&conn), vec!["Alpha", "Beta", "Gamma"]);
+
+        reorder_folders(&conn, &[c.id.clone(), a.id.clone(), b.id.clone()]).unwrap();
+        assert_eq!(names(&conn), vec!["Gamma", "Alpha", "Beta"]);
+
+        // a freshly created folder still appends to the end
+        create_folder(&conn, "Delta").unwrap();
+        assert_eq!(names(&conn), vec!["Gamma", "Alpha", "Beta", "Delta"]);
+    }
+
+    #[test]
+    fn v8_backfill_ranks_existing_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        // apply migrations up to (but not including) v8
+        for (i, m) in MIGRATIONS.iter().take(7).enumerate() {
+            conn.execute_batch(&format!("BEGIN;\n{}\nPRAGMA user_version = {};\nCOMMIT;", m, i + 1))
+                .unwrap();
+        }
+        // raw rows with controlled order keys (title_explicit exists since v5)
+        conn.execute(
+            "INSERT INTO documents (id, name, type, folder_id, content, created_at, updated_at, title_explicit)
+             VALUES ('old', 'Old', 'generic', NULL, '', '2026-01', '2026-01', 0),
+                    ('new', 'New', 'generic', NULL, '', '2026-03', '2026-03', 0),
+                    ('mid', 'Mid', 'generic', NULL, '', '2026-02', '2026-02', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO folders (id, name, parent_id, created_at, updated_at, active)
+             VALUES ('fb', 'Beta', NULL, '2026-01', '2026-01', 1),
+                    ('fa', 'alpha', NULL, '2026-01', '2026-01', 1)",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version as usize, MIGRATIONS.len());
+
+        // documents ranked newest-first → backfilled order matches list order
+        let docs = list_documents(&conn).unwrap();
+        assert_eq!(docs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), vec!["new", "mid", "old"]);
+        assert_eq!(docs.iter().find(|d| d.id == "new").unwrap().sort_order, 0);
+        assert_eq!(docs.iter().find(|d| d.id == "old").unwrap().sort_order, 2);
+
+        // folders ranked by NOCASE name → alpha before Beta
+        let folders = list_folders(&conn).unwrap();
+        assert_eq!(folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["alpha", "Beta"]);
+        assert_eq!(folders.iter().find(|f| f.id == "fa").unwrap().sort_order, 0);
+        assert_eq!(folders.iter().find(|f| f.id == "fb").unwrap().sort_order, 1);
     }
 }

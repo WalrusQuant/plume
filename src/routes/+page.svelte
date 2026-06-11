@@ -8,6 +8,7 @@
   import Toolbar from "$lib/components/Toolbar.svelte";
   import TopBar from "$lib/components/TopBar.svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
+  import HomeShelf from "$lib/components/HomeShelf.svelte";
   import Preview from "$lib/components/Preview.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NewDocumentDialog from "$lib/components/NewDocumentDialog.svelte";
@@ -43,6 +44,10 @@
   let theme = $state<Theme>("dark");
   let sidebarCollapsed = $state(false);
   let dialogOpen = $state(false);
+  /** Type pre-selected in the new-document dialog (e.g. "plan" from the shelf). */
+  let dialogInitialType = $state<DocType>("generic");
+  /** Project the dialog's new doc should land in; null = unfiled. */
+  let dialogFolderId = $state<string | null>(null);
   let settingsOpen = $state(false);
   type PreviewMode = "rendered" | "linkedin" | "x-thread" | "x-article";
   let previewMode = $state<PreviewMode>("rendered");
@@ -70,6 +75,8 @@
   const lastSnapshotAt = new Map<string, number>();
 
   const selectedDoc = $derived(documents.find((d) => d.id === selectedDocId));
+  /** On home the shelf IS the navigation — the sidebar only shows with a doc. */
+  const isHome = $derived(!loading && !selectedDoc);
 
   // ----- persistence (debounced save) -----
 
@@ -259,6 +266,28 @@
     const doc = await api.createDocument(name, type, body);
     documents = [doc, ...documents];
     await selectDocument(doc.id);
+    return doc;
+  }
+
+  /** Open the new-document dialog, optionally pre-selecting a type and a
+      destination project (the shelf's "New plan" / per-project "+ New page"). */
+  function openNewDocument(type: DocType = "generic", folderId: string | null = null) {
+    dialogInitialType = type;
+    dialogFolderId = folderId;
+    dialogOpen = true;
+  }
+
+  async function createDocumentFromDialog(name: string, type: DocType) {
+    const doc = await createDocument(name, type);
+    if (dialogFolderId) await moveDocument(doc.id, dialogFolderId);
+  }
+
+  /** Back to the shelf: no document open. */
+  async function goHome() {
+    await flushSave();
+    editorView = null;
+    selectedDocId = null;
+    void assistant.loadFor(null);
   }
 
   // ----- idea inbox -----
@@ -445,6 +474,42 @@
     documents = documents.map((d) => (d.id === id ? updated : d));
   }
 
+  /** Persist a manual reorder of one sidebar section. Optimistic: stamp each
+      id's new sortOrder (the global `documents` array stays recency-ordered;
+      buildSidebarTree re-sorts each section), roll back on failure. */
+  async function reorderDocuments(ids: string[]) {
+    const prev = documents;
+    const orderOf = new Map(ids.map((id, i) => [id, i]));
+    documents = documents.map((d) =>
+      orderOf.has(d.id) ? { ...d, sortOrder: orderOf.get(d.id)! } : d,
+    );
+    try {
+      await api.reorderDocuments(ids);
+    } catch (e) {
+      documents = prev; // restore previous order; run() surfaces the toast
+      throw e;
+    }
+  }
+
+  /** Reorder the folders themselves. The `folders` array order IS the sidebar
+      order, so rebuild it in drop order (ids covers every folder). */
+  async function reorderFolders(ids: string[]) {
+    const prev = folders;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    folders = ids
+      .map((id, i) => {
+        const f = byId.get(id);
+        return f ? { ...f, sortOrder: i } : null;
+      })
+      .filter((f): f is Folder => f !== null);
+    try {
+      await api.reorderFolders(ids);
+    } catch (e) {
+      folders = prev;
+      throw e;
+    }
+  }
+
   async function deleteDocument(id: string) {
     await api.deleteDocument(id);
     pendingSaves.delete(id); // never retry a save against a deleted row
@@ -453,14 +518,10 @@
     // if the deleted idea is open in the capture modal, close it
     if (ideaModalId === id) ideaModalOpen = false;
     if (selectedDocId === id) {
+      // land on the home shelf rather than yanking another doc open
       selectedDocId = null;
-      // fall back to the first real document — ideas never open in the editor
-      const next = documents.find((d) => d.type !== "idea");
-      if (next) {
-        await selectDocument(next.id);
-      } else {
-        void assistant.loadFor(null);
-      }
+      editorView = null;
+      void assistant.loadFor(null);
     }
   }
 
@@ -472,6 +533,11 @@
 
   async function renameFolder(id: string, name: string) {
     const updated = await api.renameFolder(id, name);
+    folders = folders.map((f) => (f.id === id ? updated : f));
+  }
+
+  async function toggleFolderActive(id: string, active: boolean) {
+    const updated = await api.setFolderActive(id, active);
     folders = folders.map((f) => (f.id === id ? updated : f));
   }
 
@@ -507,9 +573,7 @@
           api.listFolders(),
           api.listExportTargets(),
         ]);
-        if (documents.length > 0) {
-          await selectDocument(documents[0].id);
-        }
+        // no auto-select: boot lands on the home shelf
       } catch (e) {
         toast.error(`Loading documents failed: ${e}`);
       }
@@ -529,7 +593,7 @@
   });
 </script>
 
-<div class="app-layout {sidebarCollapsed ? 'app-layout--collapsed' : ''}">
+<div class="app-layout {sidebarCollapsed || isHome ? 'app-layout--collapsed' : ''}">
   <Sidebar
     {documents}
     {folders}
@@ -537,7 +601,8 @@
     {expandingId}
     {expandingLabel}
     onSelect={(id) => run(selectDocument(id), "Opening document")}
-    onNewDocument={() => (dialogOpen = true)}
+    onGoHome={() => run(goHome(), "Home")}
+    onNewDocument={() => openNewDocument()}
     onNewIdea={newIdea}
     onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
     onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
@@ -545,14 +610,17 @@
     onRename={(id, name) => run(renameDocument(id, name), "Rename")}
     onDelete={(id) => run(deleteDocument(id), "Delete")}
     onMoveDocument={(id, folderId) => run(moveDocument(id, folderId), "Move")}
+    onReorderDocuments={(ids) => run(reorderDocuments(ids), "Reorder")}
+    onReorderFolders={(ids) => run(reorderFolders(ids), "Reorder")}
     onCreateFolder={createFolder}
     onRenameFolder={(id, name) => run(renameFolder(id, name), "Rename folder")}
     onDeleteFolder={(id) => run(deleteFolder(id), "Delete folder")}
   />
   <NewDocumentDialog
     open={dialogOpen}
+    initialType={dialogInitialType}
     onClose={() => (dialogOpen = false)}
-    onCreate={(name, type) => run(createDocument(name, type), "Create document")}
+    onCreate={(name, type) => run(createDocumentFromDialog(name, type), "Create document")}
   />
   <IdeaCaptureModal
     open={ideaModalOpen}
@@ -646,16 +714,20 @@
       </div>
       <StatusBar documentName={selectedDoc.name} cursorPosition={cursorPos} {wordCount} />
     {:else}
-      <div class="empty-state">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.15">
-          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-          <polyline points="14,2 14,8 20,8" />
-          <line x1="16" y1="13" x2="8" y2="13" />
-          <line x1="16" y1="17" x2="8" y2="17" />
-        </svg>
-        <h2>No document selected</h2>
-        <p>Create a document or select one from the sidebar</p>
-      </div>
+      <HomeShelf
+        {documents}
+        {folders}
+        onOpenDocument={(id) => run(selectDocument(id), "Opening document")}
+        onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
+        onCreateProject={createFolder}
+        onNewPage={(folderId) => openNewDocument("generic", folderId)}
+        onNewPlan={() => openNewDocument("plan")}
+        onNewIdea={newIdea}
+        onToggleActive={(id, active) => run(toggleFolderActive(id, active), "Update project")}
+        {theme}
+        onToggleTheme={() => applyTheme(theme === "dark" ? "light" : "dark")}
+        onOpenSettings={() => (settingsOpen = true)}
+      />
     {/if}
   </div>
 </div>

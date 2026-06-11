@@ -34,6 +34,16 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     description: "Multi-post thread for X/Twitter",
   },
   {
+    type: "plan",
+    label: "Plan",
+    description: "Lightweight build plan — the start of a build-in-public loop",
+  },
+  {
+    type: "build-log",
+    label: "Build Log",
+    description: "Dated working notes — raw material for posts",
+  },
+  {
     type: "skill",
     label: "Skill",
     description: "Claude Code skill with YAML frontmatter",

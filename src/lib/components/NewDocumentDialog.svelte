@@ -5,14 +5,20 @@
 
   interface Props {
     open: boolean;
+    /** Pre-selected type when the dialog opens (e.g. "plan" from the shelf's + New menu). */
+    initialType?: DocType;
     onClose: () => void;
     onCreate: (name: string, type: DocType) => void;
   }
 
-  let { open, onClose, onCreate }: Props = $props();
+  let { open, initialType = "generic", onClose, onCreate }: Props = $props();
 
   let selectedType = $state<DocType>("generic");
   let name = $state("");
+
+  $effect(() => {
+    if (open) selectedType = initialType;
+  });
 
   const selectedConfig = $derived(DOCUMENT_TYPES.find((t) => t.type === selectedType));
 

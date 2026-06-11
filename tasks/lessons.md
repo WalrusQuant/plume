@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-06-11 — Don't reach for macOS system access to verify UI; the user is the eyes
+- **Mistake:** Tried to verify the home shelf by scripting clicks via AppleScript/System Events and capturing the screen with `screencapture` — both blocked by macOS permissions, and the user objected: "stop trying to access shit you're not supposed to."
+- **Rule:** Verification of this desktop app's UI = automated checks (`cargo test`, `pnpm check`, sqlite3 inspection of the DB) + asking the user to run `pnpm tauri dev` and look/screenshot. Never attempt screen recording, accessibility scripting, or other OS-permission-gated access on this machine.
+
+## 2026-06-11 — The home shelf replaces the sidebar; never show both
+- **Mistake:** Shipped the shelf with the sidebar nav still visible alongside it — the same projects/docs/Inbox listed twice. User: "the left nav bar is still there, so who cares about the welcome screen?"
+- **Rule:** On home, the shelf IS the navigation: collapse the sidebar (`app-layout--collapsed`) whenever no doc is open. The sidebar belongs to the editor view only. More generally: a new screen that duplicates an existing nav surface should replace it, not sit next to it.
+
 ## 2026-06-10 — Honor the user's selected model in every AI flow; never hardcode `model: null`
 - **Mistake:** idea-expand, content-multiply, and inline-edit controllers passed `model: null` to the backend, which falls back to `provider.default_model()` (OpenRouter `anthropic/claude-opus-4.8`). The user had a cheap model (MiMo) selected but every Multiply/Expand silently ran **Opus** — real money, caught only by checking OpenRouter usage.
 - **Rule:** A model the user explicitly selects in Settings must be used by **all** AI surfaces (chat, expand, multiply, inline). Pass `assistant.settings.model || null`, not `null`. A "use a stronger/cheaper model for job type X" optimization must never silently override the user's explicit choice — if that tiering is wanted, make it a visible setting. When reviewing an AI call site, check what model actually reaches the provider.

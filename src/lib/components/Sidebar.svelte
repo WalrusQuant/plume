@@ -2,6 +2,7 @@
   import { confirm } from "@tauri-apps/plugin-dialog";
   import { api, type DocType, type Document, type Folder, type SearchHit } from "$lib/api";
   import { buildSidebarTree } from "$lib/buildSidebarTree";
+  import { formatDate } from "$lib/formatDate";
   import { DOCUMENT_TYPES } from "$lib/documentTypes";
   import { MULTIPLY_TARGETS } from "$lib/multiplyTargets";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
@@ -14,6 +15,7 @@
     expandingId: string | null;
     expandingLabel: string;
     onSelect: (id: string) => void;
+    onGoHome: () => void;
     onNewDocument: () => void;
     onNewIdea: () => void;
     onOpenIdea: (id: string) => void;
@@ -22,6 +24,8 @@
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
     onMoveDocument: (id: string, folderId: string | null) => void;
+    onReorderDocuments: (ids: string[]) => void;
+    onReorderFolders: (ids: string[]) => void;
     onCreateFolder: (name: string) => Promise<Folder>;
     onRenameFolder: (id: string, name: string) => void;
     onDeleteFolder: (id: string) => void;
@@ -34,6 +38,7 @@
     expandingId,
     expandingLabel,
     onSelect,
+    onGoHome,
     onNewDocument,
     onNewIdea,
     onOpenIdea,
@@ -42,6 +47,8 @@
     onRename,
     onDelete,
     onMoveDocument,
+    onReorderDocuments,
+    onReorderFolders,
     onCreateFolder,
     onRenameFolder,
     onDeleteFolder,
@@ -76,6 +83,82 @@
   const tree = $derived(buildSidebarTree(folders, documents));
   const moveDoc = $derived(documents.find((d) => d.id === moveDocId));
 
+  // ----- drag-and-drop reordering -----
+  //
+  // Reorder-only, and only within a row's own section. A section is one
+  // contiguous orderable list: a folder's docs (keyed by folder id), the
+  // unfiled docs ("unfiled"), the Inbox ideas ("inbox"), or the folders
+  // themselves ("folders"). Cross-section moves stay on MoveToFolderMenu —
+  // dragover only accepts (preventDefault) when kind + section match the drag
+  // source, so foreign targets show the no-drop cursor and can't receive a drop.
+  type DragKind = "doc" | "folder";
+  let dragSource = $state<{ kind: DragKind; id: string; section: string } | null>(null);
+  let dropTarget = $state<{ id: string; edge: "before" | "after" } | null>(null);
+
+  /** The ordered id list of a section, read from the already-sorted tree. */
+  function sectionIdsFor(section: string): string[] {
+    if (section === "inbox") return tree.ideas.map((d) => d.id);
+    if (section === "unfiled") return tree.unfiled.map((d) => d.id);
+    if (section === "folders") return tree.folderTree.map((f) => f.id);
+    const folder = tree.folderTree.find((f) => f.id === section);
+    return folder ? folder.documents.map((d) => d.id) : [];
+  }
+
+  function handleDragStart(e: DragEvent, kind: DragKind, id: string, section: string) {
+    // never start a drag from a row that's mid-rename (draggable is already off,
+    // but guard anyway)
+    if (kind === "doc" && editingId === id) return;
+    if (kind === "folder" && editingFolderId === id) return;
+    dragSource = { kind, id, section };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      // WebKit refuses to begin a drag unless some data is attached
+      e.dataTransfer.setData("text/plain", id);
+    }
+  }
+
+  function handleDragOver(e: DragEvent, kind: DragKind, id: string, section: string) {
+    if (!dragSource || dragSource.kind !== kind || dragSource.section !== section) return;
+    if (dragSource.id === id) {
+      dropTarget = null;
+      return;
+    }
+    e.preventDefault(); // accept the drop (omitting this = no-drop cursor)
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; // move arrow, not copy badge
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const edge = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    dropTarget = { id, edge };
+  }
+
+  function handleDrop(e: DragEvent, kind: DragKind, id: string, section: string) {
+    e.preventDefault();
+    const source = dragSource;
+    const edge = dropTarget?.edge ?? "before";
+    // clear here: the reorder re-renders and may recycle this node before
+    // dragend would fire
+    dragSource = null;
+    dropTarget = null;
+    if (!source || source.kind !== kind || source.section !== section) return;
+    if (source.id === id) return;
+
+    const ids = sectionIdsFor(section);
+    const from = ids.indexOf(source.id);
+    if (from === -1) return;
+    ids.splice(from, 1);
+    let to = ids.indexOf(id);
+    if (to === -1) return;
+    if (edge === "after") to += 1;
+    ids.splice(to, 0, source.id);
+
+    if (kind === "folder") onReorderFolders(ids);
+    else onReorderDocuments(ids);
+  }
+
+  function handleDragEnd() {
+    dragSource = null;
+    dropTarget = null;
+  }
+
   // Cross-document full-text search. Non-empty query replaces the tree with
   // ranked results; debounced, with a sequence guard so out-of-order responses
   // can't overwrite newer ones.
@@ -107,19 +190,6 @@
   function focusOnMount(node: HTMLInputElement) {
     node.focus();
     node.select();
-  }
-
-  function formatDate(iso: string): string {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMins = Math.floor((now.getTime() - d.getTime()) / 60000);
-    if (diffMins < 1) return "Just now";
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
   function startRename(doc: Document) {
@@ -178,9 +248,17 @@
   }
 </script>
 
-{#snippet docItem(doc: Document)}
+{#snippet docItem(doc: Document, section: string)}
   <div
     class="sidebar-item {doc.id === selectedDocId ? 'sidebar-item--active' : ''}"
+    class:sidebar-item--dragging={dragSource?.id === doc.id}
+    class:sidebar-item--drop-before={dropTarget?.id === doc.id && dropTarget.edge === "before"}
+    class:sidebar-item--drop-after={dropTarget?.id === doc.id && dropTarget.edge === "after"}
+    draggable={editingId !== doc.id}
+    ondragstart={(e) => handleDragStart(e, "doc", doc.id, section)}
+    ondragover={(e) => handleDragOver(e, "doc", doc.id, section)}
+    ondrop={(e) => handleDrop(e, "doc", doc.id, section)}
+    ondragend={handleDragEnd}
     onclick={() => onSelect(doc.id)}
     onkeydown={(e) => e.key === "Enter" && onSelect(doc.id)}
     role="button"
@@ -251,6 +329,14 @@
 {#snippet ideaItem(doc: Document)}
   <div
     class="sidebar-item {doc.id === selectedDocId ? 'sidebar-item--active' : ''}"
+    class:sidebar-item--dragging={dragSource?.id === doc.id}
+    class:sidebar-item--drop-before={dropTarget?.id === doc.id && dropTarget.edge === "before"}
+    class:sidebar-item--drop-after={dropTarget?.id === doc.id && dropTarget.edge === "after"}
+    draggable="true"
+    ondragstart={(e) => handleDragStart(e, "doc", doc.id, "inbox")}
+    ondragover={(e) => handleDragOver(e, "doc", doc.id, "inbox")}
+    ondrop={(e) => handleDrop(e, "doc", doc.id, "inbox")}
+    ondragend={handleDragEnd}
     onclick={() => onOpenIdea(doc.id)}
     onkeydown={(e) => e.key === "Enter" && onOpenIdea(doc.id)}
     role="button"
@@ -353,6 +439,12 @@
       <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
     <span class="sidebar-brand-text">Plume</span>
+    <button class="sidebar-home-btn" onclick={onGoHome} title="Home">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        <polyline points="9 22 9 12 15 12 15 22" />
+      </svg>
+    </button>
   </div>
 
   <div class="sidebar-search">
@@ -438,6 +530,14 @@
       <div class="sidebar-folder">
         <div
           class="sidebar-folder-header"
+          class:sidebar-folder-header--dragging={dragSource?.id === folder.id}
+          class:sidebar-folder-header--drop-before={dropTarget?.id === folder.id && dropTarget.edge === "before"}
+          class:sidebar-folder-header--drop-after={dropTarget?.id === folder.id && dropTarget.edge === "after"}
+          draggable={editingFolderId !== folder.id}
+          ondragstart={(e) => handleDragStart(e, "folder", folder.id, "folders")}
+          ondragover={(e) => handleDragOver(e, "folder", folder.id, "folders")}
+          ondrop={(e) => handleDrop(e, "folder", folder.id, "folders")}
+          ondragend={handleDragEnd}
           onclick={() => toggleFolder(folder.id)}
           onkeydown={(e) => e.key === "Enter" && toggleFolder(folder.id)}
           role="button"
@@ -504,7 +604,7 @@
         {#if !collapsedFolders.has(folder.id)}
           <div class="sidebar-folder-children">
             {#each folder.documents as doc (doc.id)}
-              {@render docItem(doc)}
+              {@render docItem(doc, folder.id)}
             {/each}
             {#if folder.documents.length === 0}
               <div class="sidebar-folder-empty">Empty folder</div>
@@ -515,7 +615,7 @@
     {/each}
 
     {#each tree.unfiled as doc (doc.id)}
-      {@render docItem(doc)}
+      {@render docItem(doc, "unfiled")}
     {/each}
 
     {#if documents.length === 0 && folders.length === 0}

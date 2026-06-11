@@ -9,6 +9,8 @@ export type DocType =
   | "claude-md"
   | "system-prompt"
   | "runbook"
+  | "plan"
+  | "build-log"
   | "idea"
   | "generic";
 
@@ -22,6 +24,8 @@ export interface Document {
   /** True once the name was set deliberately; false means it's derived (ideas:
       from the first line) and may be auto-updated. */
   titleExplicit: boolean;
+  /** Manual position within its sidebar section. Lower sorts first. */
+  sortOrder: number;
 }
 
 export interface Folder {
@@ -30,6 +34,10 @@ export interface Folder {
   parentId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Shelf curation: active projects sit on top, resting ones collapse below. */
+  active: boolean;
+  /** Manual position among the folders. Lower sorts first. */
+  sortOrder: number;
 }
 
 /** A full-text search result row. `snippet` is a highlighted excerpt with `[ ]`
@@ -122,7 +130,13 @@ export const api = {
   createFolder: (name: string) => invoke<Folder>("create_folder", { name }),
   renameFolder: (id: string, name: string) =>
     invoke<Folder>("rename_folder", { id, name }),
+  setFolderActive: (id: string, active: boolean) =>
+    invoke<Folder>("set_folder_active", { id, active }),
   deleteFolder: (id: string) => invoke<void>("delete_folder", { id }),
+  /** Persist a manual ordering; ids are the section's docs in their new order. */
+  reorderDocuments: (ids: string[]) =>
+    invoke<void>("reorder_documents", { ids }),
+  reorderFolders: (ids: string[]) => invoke<void>("reorder_folders", { ids }),
 
   listExportTargets: () => invoke<ExportTarget[]>("list_export_targets"),
   exportDocument: (content: string, docName: string, targetId: string) =>
