@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{AppHandle, State};
 
-use crate::ai::{self, AiState, ChatMessage, Provider};
+use crate::ai::{self, AiState, ChatMessage, DocReference, Provider};
 use crate::error::{Error, Result};
 use crate::export::{self, ExportOutput, ExportTarget};
 use crate::storage::{self, DocType, Document, Folder};
@@ -84,6 +84,11 @@ pub fn get_document_content(db: State<Db>, id: String) -> Result<String> {
 #[tauri::command]
 pub fn save_document_content(db: State<Db>, id: String, content: String) -> Result<()> {
     db.with(|conn| storage::save_document_content(conn, &id, &content))
+}
+
+#[tauri::command]
+pub fn search_documents(db: State<Db>, query: String) -> Result<Vec<storage::SearchHit>> {
+    db.with(|conn| storage::search_documents(conn, &query))
 }
 
 #[tauri::command]
@@ -277,9 +282,20 @@ pub fn send_assistant_message(
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
+    references: Vec<DocReference>,
     voice: Option<String>,
 ) -> Result<()> {
-    ai::start_stream(app, &state, stream_id, provider, model, messages, document_content, voice)
+    ai::start_stream(
+        app,
+        &state,
+        stream_id,
+        provider,
+        model,
+        messages,
+        document_content,
+        references,
+        voice,
+    )
 }
 
 #[tauri::command]

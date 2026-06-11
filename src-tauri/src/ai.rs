@@ -64,6 +64,15 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// A document the user @-mentioned in chat, attached as background context for a
+/// single message. Sent from the frontend (name + content); rendered into the
+/// system prompt as a labeled block separate from the editable document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocReference {
+    pub name: String,
+    pub content: String,
+}
+
 /// Tracks the in-flight streaming task (and its stream id) so
 /// stop/new-message can cancel it and report which stream ended.
 #[derive(Default)]
@@ -171,10 +180,31 @@ fn voice_section(voice: Option<&str>) -> String {
     }
 }
 
+/// @-mentioned documents, rendered as a labeled block AFTER the editable
+/// document so the model treats them as background, not the doc to revise.
+/// Empty → no section (byte-identical prompt to before the feature).
+fn references_section(references: &[DocReference]) -> String {
+    if references.is_empty() {
+        return String::new();
+    }
+    let mut s = String::from(
+        "\n\nReferenced documents the user attached for context — use them as background; \
+         do NOT rewrite them or treat them as the document being edited:",
+    );
+    for r in references {
+        s.push_str(&format!(
+            "\n\n--- Referenced: \"{}\" ---\n{}\n--- end ---",
+            r.name, r.content
+        ));
+    }
+    s
+}
+
 /// Chat system prompt. The model is a writing partner with the live document as
 /// context; revisions of the whole doc come back in a ```markdown block so the
-/// UI can apply them in one click.
-fn system_prompt(document_content: &str, voice: Option<&str>) -> String {
+/// UI can apply them in one click. `references` are @-mentioned docs added as
+/// background; `voice` stays last so style never overrides the format rules.
+fn system_prompt(document_content: &str, references: &[DocReference], voice: Option<&str>) -> String {
     format!(
         "You are the AI writing partner in Plume, a local-first desktop app for content \
          creators who write in markdown and publish across platforms (blogs, \
@@ -182,7 +212,8 @@ fn system_prompt(document_content: &str, voice: Option<&str>) -> String {
          review, improve, or generate content. Be concise and direct. When you propose a \
          revised version of the whole document, give the complete markdown in a \
          ```markdown code block so it can be applied in one click.\n\n\
-         Current document content:\n---\n{document_content}\n---{voice}",
+         Current document content:\n---\n{document_content}\n---{references}{voice}",
+        references = references_section(references),
         voice = voice_section(voice)
     )
 }
@@ -338,12 +369,13 @@ pub fn start_stream(
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
+    references: Vec<DocReference>,
     voice: Option<String>,
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.default_model().to_string());
-    let system = system_prompt(&document_content, voice.as_deref());
+    let system = system_prompt(&document_content, &references, voice.as_deref());
     run_stream(app, state, stream_id, provider, model, system, messages)
 }
 
@@ -692,7 +724,7 @@ mod tests {
     #[test]
     fn voice_injected_into_all_surfaces_when_set() {
         let v = Some("terse, lowercase, dry wit");
-        assert!(system_prompt("doc", v).contains("terse, lowercase, dry wit"));
+        assert!(system_prompt("doc", &[], v).contains("terse, lowercase, dry wit"));
         assert!(inline_system_prompt("doc", "sel", v).contains("terse, lowercase, dry wit"));
         assert!(expand_system_prompt("idea", "Blog Post", v).contains("terse, lowercase, dry wit"));
         assert!(
@@ -704,8 +736,8 @@ mod tests {
     #[test]
     fn voice_absent_when_unset_or_blank() {
         // None and whitespace both yield no voice section
-        assert!(!system_prompt("doc", None).contains("Voice & tone"));
-        assert!(!system_prompt("doc", Some("   ")).contains("Voice & tone"));
+        assert!(!system_prompt("doc", &[], None).contains("Voice & tone"));
+        assert!(!system_prompt("doc", &[], Some("   ")).contains("Voice & tone"));
     }
 
     #[test]
@@ -716,5 +748,28 @@ mod tests {
         let rule = prompt.find("ONLY the replacement text").unwrap();
         let voice = prompt.find("Voice & tone").unwrap();
         assert!(rule < voice);
+    }
+
+    #[test]
+    fn references_absent_when_empty_unchanged_prompt() {
+        // no @-mentions → byte-identical to the pre-feature prompt
+        assert!(!system_prompt("doc", &[], None).contains("Referenced"));
+    }
+
+    #[test]
+    fn references_injected_after_document_before_voice() {
+        let refs = vec![DocReference {
+            name: "Pricing notes".into(),
+            content: "we charge $9/mo".into(),
+        }];
+        let prompt = system_prompt("the live doc", &refs, Some("terse and dry"));
+        // reference content is present and labeled
+        assert!(prompt.contains("Referenced: \"Pricing notes\""));
+        assert!(prompt.contains("we charge $9/mo"));
+        // ordering: editable doc → references → voice (style stays last)
+        let doc = prompt.find("the live doc").unwrap();
+        let refs_at = prompt.find("Referenced:").unwrap();
+        let voice = prompt.find("Voice & tone").unwrap();
+        assert!(doc < refs_at && refs_at < voice);
     }
 }

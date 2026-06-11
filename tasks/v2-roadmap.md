@@ -1,11 +1,11 @@
 # v2 Roadmap — from markdown editor to content operation
 
-> Status (updated 2026-06-10): **#1–6 and #9 shipped.** The only feature left
-> for the v2 (sellable) release is **#7 Stage A** (cross-doc search +
-> @-mention) — a fully local-first product. **v2.5:** #8 publishing + #7 Stage
-> B — the network/API layer, carved out so it never gates the v2 ship. See
-> "Release plan" at the bottom. Each feature entry below keeps its full
-> implementation notes.
+> Status (updated 2026-06-10): **#1–6, #9, and #7 Stage A all shipped — the v2
+> feature set is complete**, pending the polish backlog (compaction, assistant
+> hardening, docx round 2). **v2.5:** #8 publishing + #7 Stage B — the
+> network/API layer, carved out so it never gated the v2 ship. See "Release
+> plan" at the bottom. Each feature entry below keeps its full implementation
+> notes.
 >
 > Theme: v1 helps you *write* a document. v2 helps you run a *content
 > operation* — multiply one piece across platforms, in your own voice. v2.5
@@ -36,7 +36,7 @@
 | 4 | Inline AI edit (selection menu) | Medium | none | #2 strongly recommended | ✅ done 2026-06-10 (selection menu, click-driven) |
 | 5 | Idea inbox / quick capture | Medium | migration v5 | — | ✅ done 2026-06-10 (click-driven Inbox; redesigned to notes-in-a-modal, PR #6) |
 | 6 | Voice profile | Medium | none | — | ✅ done 2026-06-10 (shipped as a global Voice & tone setting injected into all prompts; exemplar-picker + AI distillation deferred) |
-| 7A | Cross-doc search + @-mention | Med-Low | FTS5 migration | — | **v2** |
+| 7A | Cross-doc search + @-mention | Med-Low | FTS5 migration (v6) | — | ✅ done 2026-06-10 |
 | 9 | Content multiplication | Medium | none (folders, not derived_from) | #6 ✅ (builds on #5 ✅) | ✅ done 2026-06-10 |
 | 7B | AI recall (search tool-loop) | High | none (uses 7A) | #7A | v2.5 |
 | 8 | Pipeline & publishing | High | migration(s) | — | v2.5 |
@@ -296,8 +296,18 @@ vs manual-only (start manual).
 
 ## 7. Cross-document memory (search + AI recall)
 
-> **Release split (2026-06-10):** Stage A (search + @-mention) → **v2**.
-> Stage B (AI search tool-loop) → **v2.5**.
+> **Release split (2026-06-10):** Stage A (search + @-mention) → ✅ **shipped
+> in v2**. Stage B (AI search tool-loop) → **v2.5**.
+>
+> **✅ Stage A shipped 2026-06-10.** FTS5 standalone index (`documents_fts`,
+> migration v6) maintained by explicit upserts in the storage write path
+> (`fts_index`/`fts_delete`); `search_documents` is sanitized (`fts_query`
+> neutralizes FTS5 operators), bm25-weighted (title over body), documents-only
+> (excludes ideas). Sidebar search box replaces the tree with ranked results.
+> @-mention uses a backend `references` section (`DocReference` +
+> `references_section` in `ai.rs`, threaded through `send_assistant_message`) so
+> attached docs stay separate from the doc being edited; an `@`-picker filters
+> the in-memory doc list. Stage B (the tool-loop) remains deferred.
 
 **What:** Two stages. (a) Full-text search across all docs (table stakes).
 (b) The assistant can *consult* the corpus: "what have I written about
@@ -439,25 +449,20 @@ knowledge lives in prompts vs renderer post-processing (start prompts-only).
 
 ## Release plan (revised 2026-06-10)
 
-### Shipped — #1–6 + #9 (2026-06-10)
+### Shipped — #1–6, #9, #7A (2026-06-10) — v2 feature set complete
 X thread + X Article export, document snapshots/history, multiple chats +
 token visibility, inline AI edit, idea inbox, global Voice & tone (#1–6 across
-PRs #1–#7), and **#9 content multiplication** — the moat: from a finished doc,
+PRs #1–#7); **#9 content multiplication** — the moat: from a finished doc,
 generate platform-native variants (blog, newsletter, LinkedIn, X thread) in the
-user's voice, collected with the source into one folder. Built on the
-idea-expand primitive (#5); folder-grouped, so no migration.
+user's voice, collected with the source into one folder (folder-grouped, no
+migration); and **#7 Stage A — cross-document search + @-mention**: FTS5
+sidebar search (sanitized, bm25-weighted, documents-only) + a backend
+`references` section feeding @-mentioned docs into the chat prompt.
 
-### v2 — "the content operation" (the sellable release)
-Fully local-first; nothing here reaches a third-party API. **Only #7 Stage A
-remains.**
-
-- **#7 Stage A — cross-document search + @-mention.** SQLite FTS5 over
-  `documents` (explicit upserts in the storage write path), a sidebar search
-  box, and @-mention to pull a doc's content into the chat's system prompt.
-  Table stakes for a corpus-based writing tool; cheap. **Stage B (the AI
-  search tool-loop) is explicitly deferred to v2.5.**
-- **Polish backlog to clear before the release:** context compaction (long
-  threads), an assistant hardening pass, docx polish round 2.
+### v2 release — remaining before ship
+The feature set is done; what's left is polish, all local:
+- **Polish backlog:** context compaction (long threads), an assistant hardening
+  pass, docx polish round 2.
 
 Story: "Write it once. Get every platform's native version, in your voice —
 all on your machine."

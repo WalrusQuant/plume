@@ -2,19 +2,74 @@
   import { tick } from "svelte";
   import { assistant } from "$lib/assistant.svelte";
   import { toast } from "$lib/toast.svelte";
+  import { api, type Document, type DocReference } from "$lib/api";
+  import DocumentIcon from "$lib/components/DocumentIcon.svelte";
 
   interface Props {
     onApply: (content: string) => void;
     onInsert: (content: string) => void;
     getDocumentContent: () => string;
+    documents: Document[];
     onOpenSettings: () => void;
   }
 
-  let { onApply, onInsert, getDocumentContent, onOpenSettings }: Props = $props();
+  let { onApply, onInsert, getDocumentContent, documents, onOpenSettings }: Props = $props();
 
   let input = $state("");
   let copiedIdx = $state<number | null>(null);
   let messagesEl: HTMLDivElement | undefined = $state();
+
+  // @-mention: attach other documents as background context for one message.
+  let inputEl: HTMLTextAreaElement | undefined = $state();
+  /** The active `@token` query (text after `@`, before the caret), or null. */
+  let mentionQuery = $state<string | null>(null);
+  /** Docs chosen as references for the next message (capped, deduped). */
+  let mentions = $state<Document[]>([]);
+  const MAX_MENTIONS = 5;
+
+  const mentionCandidates = $derived.by(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return documents
+      .filter((d) => d.type !== "idea" && !mentions.some((m) => m.id === d.id))
+      .filter((d) => d.name.toLowerCase().includes(q))
+      .slice(0, 6);
+  });
+  const showPicker = $derived(mentionQuery !== null && mentionCandidates.length > 0);
+
+  /** Recompute the active @-token from the text before the caret. */
+  function updateMentionQuery() {
+    const caret = inputEl?.selectionStart ?? input.length;
+    const m = input.slice(0, caret).match(/@([\w-]*)$/);
+    mentionQuery = m ? m[1] : null;
+  }
+
+  function selectMention(doc: Document) {
+    // strip the trailing @query fragment; the chip records the choice instead
+    const caret = inputEl?.selectionStart ?? input.length;
+    input = input.slice(0, caret).replace(/@([\w-]*)$/, "") + input.slice(caret);
+    mentionQuery = null;
+    if (mentions.length < MAX_MENTIONS && !mentions.some((m) => m.id === doc.id)) {
+      mentions = [...mentions, doc];
+    }
+  }
+
+  function removeMention(id: string) {
+    mentions = mentions.filter((m) => m.id !== id);
+  }
+
+  /** Fetch each mentioned doc's body for the references payload. */
+  async function buildReferences(): Promise<DocReference[]> {
+    const refs: DocReference[] = [];
+    for (const m of mentions) {
+      try {
+        refs.push({ name: m.name, content: await api.getDocumentContent(m.id) });
+      } catch (e) {
+        toast.error(`Couldn't attach "${m.name}": ${e}`);
+      }
+    }
+    return refs;
+  }
 
   /** Fire-and-forget chat op with a visible error toast on failure. */
   function guard(promise: Promise<unknown>, what: string) {
@@ -38,18 +93,32 @@
     void tick().then(() => messagesEl?.scrollTo({ top: messagesEl.scrollHeight }));
   });
 
-  function handleSubmit(e: Event) {
+  async function handleSubmit(e: Event) {
     e.preventDefault();
     const text = input.trim();
     if (!text || assistant.isStreaming) return;
-    void assistant.send(text, getDocumentContent());
+    const references = await buildReferences();
+    void assistant.send(text, getDocumentContent(), references);
     input = "";
+    mentions = [];
+    mentionQuery = null;
   }
 
   function handleKeyDown(e: KeyboardEvent) {
+    // while the @-picker is open, Enter picks the top match and Escape closes it
+    if (showPicker && e.key === "Enter") {
+      e.preventDefault();
+      selectMention(mentionCandidates[0]);
+      return;
+    }
+    if (mentionQuery !== null && e.key === "Escape") {
+      e.preventDefault();
+      mentionQuery = null;
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit(e);
+      void handleSubmit(e);
     }
   }
 
@@ -180,11 +249,38 @@
     </div>
 
     <form class="assistant-input-form" onsubmit={handleSubmit}>
+      {#if showPicker}
+        <div class="mention-picker">
+          {#each mentionCandidates as doc (doc.id)}
+            <button type="button" class="mention-option" onclick={() => selectMention(doc)}>
+              <DocumentIcon type={doc.type} size={14} />
+              <span class="mention-option-name">{doc.name}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+      {#if mentions.length}
+        <div class="mention-chips">
+          {#each mentions as m (m.id)}
+            <span class="mention-chip">
+              <DocumentIcon type={m.type} size={12} />
+              <span class="mention-chip-name">{m.name}</span>
+              <button type="button" class="mention-chip-remove" onclick={() => removeMention(m.id)} title="Remove">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </span>
+          {/each}
+        </div>
+      {/if}
       <textarea
         class="assistant-input"
         bind:value={input}
+        bind:this={inputEl}
+        oninput={updateMentionQuery}
         onkeydown={handleKeyDown}
-        placeholder="Ask about your document..."
+        placeholder="Ask about your document… (@ to reference another)"
         rows="2"
         disabled={assistant.isStreaming}
       ></textarea>
@@ -207,3 +303,83 @@
     </form>
   </div>
 {/if}
+
+<style>
+  .assistant-input-form {
+    position: relative;
+  }
+  .mention-picker {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 4px);
+    max-height: 14rem;
+    overflow-y: auto;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    padding: 0.25rem;
+    z-index: 20;
+  }
+  .mention-option {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    border: none;
+    border-radius: calc(var(--radius) - 2px);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    font-size: 0.85rem;
+  }
+  .mention-option:hover {
+    background: var(--bg-secondary);
+  }
+  .mention-option-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mention-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.4rem;
+  }
+  .mention-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.15rem 0.3rem 0.15rem 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    max-width: 100%;
+  }
+  .mention-chip-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 10rem;
+  }
+  .mention-chip-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .mention-chip-remove:hover {
+    color: var(--text-primary);
+  }
+</style>

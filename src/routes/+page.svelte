@@ -629,6 +629,7 @@
               onApply={applyAssistantContent}
               onInsert={insertAssistantContent}
               getDocumentContent={() => content}
+              {documents}
               onOpenSettings={() => (settingsOpen = true)}
             />
           {/if}

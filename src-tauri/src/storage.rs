@@ -192,6 +192,19 @@ const MIGRATIONS: &[&str] = &[
     CREATE INDEX idx_chat_messages_chat ON chat_messages(chat_id);",
     // v5 — explicit-vs-derived title flag (ideas: manual title vs first-line)
     "ALTER TABLE documents ADD COLUMN title_explicit INTEGER NOT NULL DEFAULT 0;",
+    // v6 — full-text search index over document titles + bodies. Standalone
+    // fts5 table keyed by the TEXT doc id (UNINDEXED — UUIDs aren't searchable
+    // text; documents has no integer rowid alias, so external-content is out).
+    // Kept in sync by explicit upserts in the write path (fts_index/fts_delete),
+    // not triggers. The backfill indexes any pre-existing documents on upgrade.
+    "CREATE VIRTUAL TABLE documents_fts USING fts5(
+        id UNINDEXED,
+        name,
+        content,
+        tokenize = 'unicode61'
+    );
+    INSERT INTO documents_fts (id, name, content)
+        SELECT id, name, content FROM documents;",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -252,6 +265,26 @@ fn get_document(conn: &Connection, id: &str) -> Result<Document> {
     .ok_or(Error::NotFound("document"))
 }
 
+/// Re-read a document's name+content and upsert it into the FTS index. Delete +
+/// insert keeps the standalone fts5 table consistent (no UPDATE on an UNINDEXED
+/// key). Re-reading the row means callers never pass name/content, so the index
+/// can't drift from the document. Call after any write that changes name/content.
+fn fts_index(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM documents_fts WHERE id = ?1", [id])?;
+    conn.execute(
+        "INSERT INTO documents_fts (id, name, content)
+         SELECT id, name, content FROM documents WHERE id = ?1",
+        [id],
+    )?;
+    Ok(())
+}
+
+/// Remove a document from the FTS index (fts5 doesn't participate in FK cascades).
+fn fts_delete(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM documents_fts WHERE id = ?1", [id])?;
+    Ok(())
+}
+
 pub fn list_documents(conn: &Connection) -> Result<Vec<Document>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {DOC_COLUMNS} FROM documents ORDER BY updated_at DESC"
@@ -282,6 +315,7 @@ pub fn create_document(
             ts
         ],
     )?;
+    fts_index(conn, &id)?;
     get_document(conn, &id)
 }
 
@@ -295,6 +329,7 @@ pub fn rename_document(conn: &Connection, id: &str, name: &str) -> Result<Docume
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
+    fts_index(conn, id)?;
     get_document(conn, id)
 }
 
@@ -316,6 +351,7 @@ pub fn update_idea_name(
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
+    fts_index(conn, id)?;
     get_document(conn, id)
 }
 
@@ -337,6 +373,7 @@ pub fn update_document_type(
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
+    fts_index(conn, id)?;
     get_document(conn, id)
 }
 
@@ -364,6 +401,7 @@ pub fn delete_document(conn: &Connection, id: &str) -> Result<()> {
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
+    fts_delete(conn, id)?;
     Ok(())
 }
 
@@ -383,7 +421,67 @@ pub fn save_document_content(conn: &Connection, id: &str, content: &str) -> Resu
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
+    fts_index(conn, id)?;
     Ok(())
+}
+
+/// A full-text search result: enough to render a ranked sidebar row and open the
+/// doc on click. Content is represented by a highlighted `snippet`, not the full
+/// body (kept cheap, like list_documents omits content).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub doc_type: DocType,
+    pub snippet: String,
+}
+
+/// Build a SAFE FTS5 MATCH query from arbitrary user input. Each whitespace token
+/// is stripped to alphanumerics and wrapped as a quoted prefix term (`"foo"*`).
+/// Quoting neutralizes FTS5 operators (AND/OR/NOT/NEAR), column filters (`col:`),
+/// and punctuation that would otherwise be a parse error; the trailing `*` gives
+/// prefix matching. Returns None when nothing searchable remains.
+fn fts_query(raw: &str) -> Option<String> {
+    let terms: Vec<String> = raw
+        .split_whitespace()
+        .map(|t| t.chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\"*"))
+        .collect();
+    (!terms.is_empty()).then(|| terms.join(" "))
+}
+
+/// Full-text search over document titles + bodies (excludes Inbox ideas). Title
+/// matches outrank body matches via bm25 column weights. Returns at most 50 hits,
+/// most-relevant first. An empty/punctuation-only query yields no hits (not an
+/// error, and no full-table scan).
+pub fn search_documents(conn: &Connection, query: &str) -> Result<Vec<SearchHit>> {
+    let Some(match_query) = fts_query(query) else {
+        return Ok(Vec::new());
+    };
+    let mut stmt = conn.prepare(
+        "SELECT f.id, d.name, d.type,
+                snippet(documents_fts, 2, '[', ']', '…', 12)
+         FROM documents_fts f
+         JOIN documents d ON d.id = f.id
+         WHERE documents_fts MATCH ?1 AND d.type <> 'idea'
+         ORDER BY bm25(documents_fts, 0.0, 10.0, 1.0)
+         LIMIT 50",
+    )?;
+    let hits = stmt
+        .query_map([match_query], |row| {
+            Ok(SearchHit {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                doc_type: DocType::parse(row.get::<_, String>(2)?.as_str())
+                    .unwrap_or(DocType::Generic),
+                snippet: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(hits)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -698,6 +796,73 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         init(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn fts5_is_available() {
+        // The rusqlite "bundled" build must ship FTS5 (SQLITE_ENABLE_FTS5);
+        // every search feature below depends on it. If this fails, the fix is a
+        // Cargo/build change, not application code.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE VIRTUAL TABLE t USING fts5(x);")
+            .expect("rusqlite bundled build must ship FTS5");
+    }
+
+    #[test]
+    fn search_matches_title_and_body() {
+        let conn = test_conn();
+        let titled =
+            create_document(&conn, "Rust Guide", None, Some("body about widgets")).unwrap();
+        let body_only =
+            create_document(&conn, "Cooking", None, Some("a recipe mentioning rust on a pan"))
+                .unwrap();
+
+        let hits = search_documents(&conn, "rust").unwrap();
+        let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+        assert!(ids.contains(&titled.id.as_str()));
+        assert!(ids.contains(&body_only.id.as_str()));
+        // title match outranks body-only match (bm25 name weight)
+        assert_eq!(hits[0].id, titled.id);
+    }
+
+    #[test]
+    fn search_reflects_edits_and_deletes() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, Some("nothing here")).unwrap();
+        assert!(search_documents(&conn, "kangaroo").unwrap().is_empty());
+
+        save_document_content(&conn, &doc.id, "now mentions kangaroo").unwrap();
+        assert_eq!(search_documents(&conn, "kangaroo").unwrap().len(), 1);
+
+        rename_document(&conn, &doc.id, "Kangaroo Notes").unwrap();
+        assert!(!search_documents(&conn, "kangaroo").unwrap().is_empty());
+
+        delete_document(&conn, &doc.id).unwrap();
+        assert!(search_documents(&conn, "kangaroo").unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_excludes_ideas() {
+        let conn = test_conn();
+        let idea =
+            create_document(&conn, "Spark", Some(DocType::Idea), Some("xylophone thoughts")).unwrap();
+        let doc =
+            create_document(&conn, "Real", Some(DocType::BlogPost), Some("xylophone music")).unwrap();
+
+        let hits = search_documents(&conn, "xylophone").unwrap();
+        let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+        assert!(ids.contains(&doc.id.as_str()));
+        assert!(!ids.contains(&idea.id.as_str()));
+    }
+
+    #[test]
+    fn search_ignores_fts_operators_safely() {
+        let conn = test_conn();
+        create_document(&conn, "Plus Test", None, Some("c++ and rust")).unwrap();
+        // raw operator / punctuation / empty input must never error
+        for q in ["c++", "foo AND bar", "\"unterminated", "NEAR", ""] {
+            assert!(search_documents(&conn, q).is_ok(), "query {q:?} errored");
+        }
     }
 
     #[test]
