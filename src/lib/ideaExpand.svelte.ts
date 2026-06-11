@@ -78,12 +78,13 @@ class IdeaExpandController {
       this.resolve = resolve;
       this.reject = reject;
     });
-    // model: null → backend uses the provider's default (strong) model
+    // Honor the user's selected model (falls back to the provider default only
+    // when none is set) — never silently use the expensive default model.
     api
       .sendIdeaExpand(
         this.activeStreamId,
         assistant.settings.provider,
-        null,
+        assistant.settings.model || null,
         idea,
         targetLabel,
         assistant.settings.voice || null,

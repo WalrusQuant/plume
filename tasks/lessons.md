@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-06-10 — Honor the user's selected model in every AI flow; never hardcode `model: null`
+- **Mistake:** idea-expand, content-multiply, and inline-edit controllers passed `model: null` to the backend, which falls back to `provider.default_model()` (OpenRouter `anthropic/claude-opus-4.8`). The user had a cheap model (MiMo) selected but every Multiply/Expand silently ran **Opus** — real money, caught only by checking OpenRouter usage.
+- **Rule:** A model the user explicitly selects in Settings must be used by **all** AI surfaces (chat, expand, multiply, inline). Pass `assistant.settings.model || null`, not `null`. A "use a stronger/cheaper model for job type X" optimization must never silently override the user's explicit choice — if that tiering is wanted, make it a visible setting. When reviewing an AI call site, check what model actually reaches the provider.
+
 ## 2026-06-10 — Don't gate features behind keyboard shortcuts; make them visible
 - **Mistake:** Shipped inline AI edit behind a hidden `Mod-J` shortcut (plus `Mod-Enter`/`Esc`). User selected text, "nothing happened," asked "where is this Mod-J," then: "I hate all these short keys."
 - **Rule:** This user dislikes keyboard shortcuts and undiscoverable affordances. Default to **visible, click-driven UI**: trigger on an obvious user action (e.g. show a selection menu when text is selected) and make every action a button. A shortcut is at most an unadvertised convenience (Esc to cancel), never the only way in. When a plan proposes a keybinding as the entry point, push back or add a visible affordance.

@@ -317,12 +317,13 @@ class InlineEditController {
         readOnlyComp.reconfigure(EditorState.readOnly.of(true)),
       ],
     });
-    // model: null → backend uses the provider's fast (Haiku-tier) model
+    // Honor the user's selected model (falls back to the provider's fast
+    // Haiku-tier model only when none is set).
     api
       .sendInlineEdit(
         this.activeStreamId,
         assistant.settings.provider,
-        null,
+        assistant.settings.model || null,
         instruction,
         selectedText,
         this.getContent(),
