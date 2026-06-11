@@ -176,5 +176,23 @@ export const api = {
     voice: string | null,
   ) =>
     invoke<void>("send_idea_expand", { streamId, provider, model, idea, targetLabel, voice }),
+  sendContentMultiply: (
+    streamId: string,
+    provider: AIProvider,
+    model: string | null,
+    sourceContent: string,
+    target: DocType,
+    targetLabel: string,
+    voice: string | null,
+  ) =>
+    invoke<void>("send_content_multiply", {
+      streamId,
+      provider,
+      model,
+      sourceContent,
+      target,
+      targetLabel,
+      voice,
+    }),
   stopAssistant: () => invoke<void>("stop_assistant"),
 };

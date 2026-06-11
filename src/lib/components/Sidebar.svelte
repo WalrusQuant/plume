@@ -3,6 +3,7 @@
   import type { DocType, Document, Folder } from "$lib/api";
   import { buildSidebarTree } from "$lib/buildSidebarTree";
   import { DOCUMENT_TYPES } from "$lib/documentTypes";
+  import { MULTIPLY_TARGETS } from "$lib/multiplyTargets";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
   import MoveToFolderMenu from "$lib/components/MoveToFolderMenu.svelte";
 
@@ -46,13 +47,9 @@
     onDeleteFolder,
   }: Props = $props();
 
-  /** Doc types an idea can be expanded into (label passed to the AI prompt). */
-  const EXPAND_TARGETS: { type: DocType; label: string }[] = [
-    { type: "blog-post", label: "Blog Post" },
-    { type: "newsletter", label: "Newsletter" },
-    { type: "linkedin-post", label: "LinkedIn Post" },
-    { type: "x-thread", label: "X Thread" },
-  ];
+  /** Doc types an idea can be expanded into (label passed to the AI prompt).
+      Shared with the document-multiply picker. */
+  const EXPAND_TARGETS = MULTIPLY_TARGETS;
   /** Idea → document types it can be converted to as-is (no AI). All non-idea
       types qualify. */
   const CONVERT_TARGETS = DOCUMENT_TYPES;

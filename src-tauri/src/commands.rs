@@ -324,6 +324,32 @@ pub fn send_idea_expand(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn send_content_multiply(
+    app: AppHandle,
+    state: State<AiState>,
+    stream_id: String,
+    provider: Provider,
+    model: Option<String>,
+    source_content: String,
+    target: DocType,
+    target_label: String,
+    voice: Option<String>,
+) -> Result<()> {
+    ai::start_content_multiply_stream(
+        app,
+        &state,
+        stream_id,
+        provider,
+        model,
+        source_content,
+        target,
+        target_label,
+        voice,
+    )
+}
+
+#[tauri::command]
 pub fn stop_assistant(app: AppHandle, state: State<AiState>) {
     ai::stop_stream(&app, &state)
 }

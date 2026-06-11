@@ -1,10 +1,11 @@
 # v2 Roadmap — from markdown editor to content operation
 
-> Status (updated 2026-06-10): **#1–6 shipped.** Remaining work is split into
-> two releases. **v2 (the sellable release):** #7 Stage A + #9 — a fully
-> local-first product. **v2.5:** #8 publishing + #7 Stage B — the network/API
-> layer, carved out so it never gates the v2 ship. See "Release plan" at the
-> bottom. Each feature entry below keeps its full implementation notes.
+> Status (updated 2026-06-10): **#1–6 and #9 shipped.** The only feature left
+> for the v2 (sellable) release is **#7 Stage A** (cross-doc search +
+> @-mention) — a fully local-first product. **v2.5:** #8 publishing + #7 Stage
+> B — the network/API layer, carved out so it never gates the v2 ship. See
+> "Release plan" at the bottom. Each feature entry below keeps its full
+> implementation notes.
 >
 > Theme: v1 helps you *write* a document. v2 helps you run a *content
 > operation* — multiply one piece across platforms, in your own voice. v2.5
@@ -36,7 +37,7 @@
 | 5 | Idea inbox / quick capture | Medium | migration v5 | — | ✅ done 2026-06-10 (click-driven Inbox; redesigned to notes-in-a-modal, PR #6) |
 | 6 | Voice profile | Medium | none | — | ✅ done 2026-06-10 (shipped as a global Voice & tone setting injected into all prompts; exemplar-picker + AI distillation deferred) |
 | 7A | Cross-doc search + @-mention | Med-Low | FTS5 migration | — | **v2** |
-| 9 | Content multiplication | Medium | small migration | #6 ✅ (builds on #5 ✅) | **v2** |
+| 9 | Content multiplication | Medium | none (folders, not derived_from) | #6 ✅ (builds on #5 ✅) | ✅ done 2026-06-10 |
 | 7B | AI recall (search tool-loop) | High | none (uses 7A) | #7A | v2.5 |
 | 8 | Pipeline & publishing | High | migration(s) | — | v2.5 |
 
@@ -387,11 +388,16 @@ each. **Decisions:** which platform first (Ghost recommended); whether
 
 ## 9. Content multiplication
 
-> **Release (2026-06-10): pulled into v2.** Now cheap — it's the shipped
-> idea-expand primitive (#5) generalized: source is a finished doc, targets
-> are N, outputs are linked docs. Reuse `start_expand_stream` + tagged-stream
-> plumbing; net-new is `derived_from`, per-target prompts, and the multi-target
-> flow. Hard prerequisite #6 (Voice) is done.
+> **✅ Shipped 2026-06-10.** Generalized the idea-expand primitive (#5):
+> `multiply_system_prompt` + per-target adaptation guidance (`ai.rs`),
+> `send_content_multiply` command, a `multiply.svelte.ts` controller cloned
+> from `ideaExpand`, a "Multiply…" TopBar button + `MultiplyModal` with a
+> target checklist and sequential per-target progress. **Grouping uses folders,
+> not `derived_from`** — multiplying collects the source + its variants into one
+> folder (the source's existing folder, or a new one named after it), so there
+> was no migration and no custom sidebar code. The `derived_from` data link and
+> the features that need it (regeneration, stale hint, campaign view) are
+> deferred to v2.5. Targets: blog-post, newsletter, linkedin-post, x-thread.
 
 **What:** The capstone. From a finished source doc: "Generate the
 newsletter version, a LinkedIn post, and an X thread." Each derivative is a
@@ -433,26 +439,23 @@ knowledge lives in prompts vs renderer post-processing (start prompts-only).
 
 ## Release plan (revised 2026-06-10)
 
-### Shipped — #1–6 (2026-06-10)
+### Shipped — #1–6 + #9 (2026-06-10)
 X thread + X Article export, document snapshots/history, multiple chats +
-token visibility, inline AI edit, idea inbox, global Voice & tone. These went
-out across PRs #1–#7.
+token visibility, inline AI edit, idea inbox, global Voice & tone (#1–6 across
+PRs #1–#7), and **#9 content multiplication** — the moat: from a finished doc,
+generate platform-native variants (blog, newsletter, LinkedIn, X thread) in the
+user's voice, collected with the source into one folder. Built on the
+idea-expand primitive (#5); folder-grouped, so no migration.
 
 ### v2 — "the content operation" (the sellable release)
-Fully local-first; nothing here reaches a third-party API.
+Fully local-first; nothing here reaches a third-party API. **Only #7 Stage A
+remains.**
 
 - **#7 Stage A — cross-document search + @-mention.** SQLite FTS5 over
   `documents` (explicit upserts in the storage write path), a sidebar search
   box, and @-mention to pull a doc's content into the chat's system prompt.
   Table stakes for a corpus-based writing tool; cheap. **Stage B (the AI
   search tool-loop) is explicitly deferred to v2.5.**
-- **#9 — content multiplication.** The moat: from a finished doc, generate
-  platform-native derivatives (newsletter, LinkedIn, X thread), each a *linked*
-  editable document (`derived_from`), in the user's voice (#6). **Builds
-  directly on the shipped idea-expand primitive (#5)** — reuse
-  `start_expand_stream`/tagged-stream-id plumbing; net-new is the
-  `derived_from` column + sidebar nesting, per-target adaptation prompts, and
-  the "Multiply…" multi-target flow.
 - **Polish backlog to clear before the release:** context compaction (long
   threads), an assistant hardening pass, docx polish round 2.
 

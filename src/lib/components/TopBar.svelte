@@ -12,6 +12,7 @@
     exportTargets: ExportTarget[];
     onExport: (targetId: string) => void;
     exportStatus: string;
+    onMultiply: () => void;
     onOpenSettings: () => void;
   }
 
@@ -25,6 +26,7 @@
     exportTargets,
     onExport,
     exportStatus,
+    onMultiply,
     onOpenSettings,
   }: Props = $props();
 
@@ -89,6 +91,14 @@
     {#if exportStatus}
       <span class="topbar-export-status">{exportStatus}</span>
     {/if}
+    <button class="topbar-theme-btn" onclick={onMultiply} title="Multiply into platform versions">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="6" cy="6" r="3" />
+        <circle cx="18" cy="6" r="3" />
+        <circle cx="18" cy="18" r="3" />
+        <path d="M9 6h6M18 9v6M15.5 7.5l-7 9" />
+      </svg>
+    </button>
     <div class="topbar-export">
       <button class="topbar-theme-btn" onclick={() => (exportOpen = !exportOpen)} title="Export">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
