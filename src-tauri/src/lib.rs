@@ -60,6 +60,7 @@ pub fn run() {
             commands::send_assistant_message,
             commands::send_inline_edit,
             commands::send_idea_expand,
+            commands::send_content_multiply,
             commands::stop_assistant,
         ])
         .run(tauri::generate_context!())

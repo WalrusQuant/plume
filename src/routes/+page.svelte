@@ -12,6 +12,8 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NewDocumentDialog from "$lib/components/NewDocumentDialog.svelte";
   import IdeaCaptureModal from "$lib/components/IdeaCaptureModal.svelte";
+  import MultiplyModal from "$lib/components/MultiplyModal.svelte";
+  import { type MultiplyProgress, type MultiplyTarget } from "$lib/multiplyTargets";
   import RightPaneTabs, { type RightPaneTab } from "$lib/components/RightPaneTabs.svelte";
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
@@ -20,6 +22,7 @@
   import { assistant } from "$lib/assistant.svelte";
   import { inlineEdit } from "$lib/inlineEdit.svelte";
   import { ideaExpand } from "$lib/ideaExpand.svelte";
+  import { multiply } from "$lib/multiply.svelte";
   import { toast } from "$lib/toast.svelte";
   import type { SnapshotMeta } from "$lib/api";
 
@@ -365,6 +368,65 @@
     }
   }
 
+  // ----- content multiplication -----
+  //
+  // From the open source document, generate a platform-native variant for each
+  // chosen target, sequentially (the single AiState slot allows only one stream
+  // at a time). The source + its variants are collected into one folder — reuse
+  // the source's folder if it has one, else create a folder named after it. The
+  // editor stays on the source throughout.
+
+  let multiplyOpen = $state(false);
+  /** Non-null while/after a multiply run; one entry per chosen target. */
+  let multiplyProgress = $state<MultiplyProgress[] | null>(null);
+
+  function openMultiply() {
+    multiplyProgress = null;
+    multiplyOpen = true;
+  }
+
+  function closeMultiply() {
+    multiplyOpen = false;
+    multiplyProgress = null;
+  }
+
+  async function multiplyDocument(targets: MultiplyTarget[]) {
+    const source = selectedDoc;
+    if (!source) return;
+    await flushSave(); // multiply the saved source, not stale editor text
+    const sourceText = content;
+    const baseName = source.name;
+    const sourceId = source.id;
+
+    // Resolve the target folder.
+    let folderId = source.folderId;
+    if (!folderId) {
+      const folder = await api.createFolder(baseName);
+      folderId = folder.id;
+      await api.moveDocument(sourceId, folderId);
+    }
+
+    multiplyProgress = targets.map((t) => ({ ...t, status: "pending" }));
+
+    for (let i = 0; i < targets.length; i++) {
+      multiplyProgress[i].status = "running";
+      try {
+        // awaited → strictly sequential, honoring the single AiState slot
+        const draft = await multiply.generate(sourceText, targets[i].type, targets[i].label);
+        const doc = await api.createDocument(`${baseName} — ${targets[i].label}`, targets[i].type, draft);
+        await api.moveDocument(doc.id, folderId);
+        multiplyProgress[i].status = "done";
+      } catch (e) {
+        multiplyProgress[i].status = "error";
+        toast.error(`${targets[i].label} failed: ${e instanceof Error ? e.message : e}`);
+        // one failure shouldn't abort the batch
+      }
+    }
+
+    // One refresh so the sidebar reflects the new folder, moved source, and variants.
+    [documents, folders] = await Promise.all([api.listDocuments(), api.listFolders()]);
+  }
+
   async function renameDocument(id: string, name: string) {
     const updated = await api.renameDocument(id, name);
     documents = documents.map((d) => (d.id === id ? updated : d));
@@ -427,6 +489,7 @@
     void assistant.init();
     void inlineEdit.init();
     void ideaExpand.init();
+    void multiply.init();
 
     (async () => {
       try {
@@ -452,6 +515,7 @@
       assistant.destroy();
       inlineEdit.destroy();
       ideaExpand.destroy();
+      multiply.destroy();
     };
   });
 </script>
@@ -490,6 +554,14 @@
     onClose={() => (ideaModalOpen = false)}
   />
   <SettingsDialog open={settingsOpen} onClose={() => (settingsOpen = false)} />
+  <MultiplyModal
+    open={multiplyOpen}
+    sourceName={selectedDoc?.name ?? ""}
+    isConfigured={assistant.isConfigured}
+    progress={multiplyProgress}
+    onMultiply={(targets) => run(multiplyDocument(targets), "Multiply")}
+    onClose={closeMultiply}
+  />
   <Toasts />
   <div class="main-content">
     {#if loading}
@@ -505,6 +577,7 @@
         {exportTargets}
         onExport={(targetId) => run(exportTo(targetId), "Export")}
         {exportStatus}
+        onMultiply={openMultiply}
         onOpenSettings={() => (settingsOpen = true)}
       />
       <Toolbar {editorView} />

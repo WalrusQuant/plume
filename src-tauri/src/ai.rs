@@ -7,6 +7,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{Error, Result};
+use crate::storage::DocType;
 
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -217,6 +218,63 @@ fn expand_system_prompt(idea: &str, target_label: &str, voice: Option<&str>) -> 
     )
 }
 
+// Platform-native adaptation guidance for content multiplication, selected per
+// target. Each string bakes in the platform's hard rules (and mirrors the
+// export-side constraints — X's ~280 char posts, LinkedIn's no-markdown / "see
+// more" fold) so the generated draft already conforms to what its exporter
+// expects on paste.
+const GUIDANCE_BLOG_POST: &str = "Adapt it into a long-form blog post: a strong \
+    title, an opening hook, logical H2/H3 sections, and a closing takeaway. Full \
+    markdown is supported — use it.";
+const GUIDANCE_NEWSLETTER: &str = "Adapt it into an email newsletter issue: a \
+    subject-line-worthy opening, a warm, direct-address voice, short scannable \
+    sections, and one clear call to action.";
+const GUIDANCE_LINKEDIN_POST: &str = "Adapt it into a single LinkedIn post. Use \
+    NO markdown syntax (no #, *, _, backticks) — LinkedIn renders none of it. \
+    Front-load the most compelling idea into the first one or two lines \
+    (everything after is hidden behind 'see more'). Short paragraphs, line breaks \
+    between thoughts, plain text only.";
+const GUIDANCE_X_THREAD: &str = "Adapt it into an X thread. Use NO markdown. Each \
+    post must stand alone and stay under ~270 characters. Open with a hook post, \
+    develop one idea per post, and do not number the posts (they are numbered on \
+    export). Plain text only.";
+
+/// Per-target adaptation guidance keyed on `DocType`. Targets without specific
+/// guidance fall back to generic adaptation.
+fn target_guidance(target: DocType) -> &'static str {
+    match target {
+        DocType::BlogPost => GUIDANCE_BLOG_POST,
+        DocType::Newsletter => GUIDANCE_NEWSLETTER,
+        DocType::LinkedinPost => GUIDANCE_LINKEDIN_POST,
+        DocType::XThread => GUIDANCE_X_THREAD,
+        _ => "",
+    }
+}
+
+/// System prompt for content multiplication: re-shape a FINISHED source document
+/// into a platform-native `target_label` (same ideas, the platform's format and
+/// audience — not a copy). Returns ONLY the markdown body so it can be written
+/// straight into a new doc. Platform rules come before the source; the style-only
+/// voice block comes last so it can't override the format contract.
+fn multiply_system_prompt(
+    source: &str,
+    target: DocType,
+    target_label: &str,
+    voice: Option<&str>,
+) -> String {
+    format!(
+        "You are the writing partner in Plume, a desktop app for content creators \
+         who write once and publish across platforms. The user has a FINISHED source \
+         document and wants a platform-native {target_label} derived from it: the same \
+         ideas, re-shaped for the platform's format and audience — not a copy of the \
+         original. {guidance} Return ONLY the markdown body of the {target_label}: no \
+         preamble, no explanation, no surrounding code fences.\n\n\
+         The source document:\n---\n{source}\n---{voice}",
+        guidance = target_guidance(target),
+        voice = voice_section(voice)
+    )
+}
+
 /// Expand a captured idea into a draft of `target_label`, streaming the draft
 /// markdown over the same `assistant:*` events (filtered by stream id, so the
 /// chat panel ignores it). Uses the provider's default (strong) model — this is
@@ -240,6 +298,33 @@ pub fn start_expand_stream(
     let messages = vec![ChatMessage {
         role: "user".into(),
         content: format!("Expand my idea into a {target_label} draft."),
+    }];
+    run_stream(app, state, stream_id, provider, model, system, messages)
+}
+
+/// Adapt a finished document into a platform-native draft of `target`, streaming
+/// the draft markdown over the same `assistant:*` events (filtered by stream id).
+/// Uses the provider's default (strong) model — a generative job. Shares the
+/// single AiState slot, so the frontend must run targets sequentially.
+#[allow(clippy::too_many_arguments)]
+pub fn start_content_multiply_stream(
+    app: AppHandle,
+    state: &AiState,
+    stream_id: String,
+    provider: Provider,
+    model: Option<String>,
+    source_content: String,
+    target: DocType,
+    target_label: String,
+    voice: Option<String>,
+) -> Result<()> {
+    let model = model
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| provider.default_model().to_string());
+    let system = multiply_system_prompt(&source_content, target, &target_label, voice.as_deref());
+    let messages = vec![ChatMessage {
+        role: "user".into(),
+        content: format!("Adapt my document into a {target_label}."),
     }];
     run_stream(app, state, stream_id, provider, model, system, messages)
 }
@@ -574,11 +659,46 @@ mod tests {
     }
 
     #[test]
+    fn multiply_prompt_includes_source_and_target_guidance() {
+        let source = "# Local-first apps\n\nWhy own your data.";
+        // LinkedIn: no-markdown rule is the platform marker
+        let li = multiply_system_prompt(source, DocType::LinkedinPost, "LinkedIn post", None);
+        assert!(li.contains("Why own your data"));
+        assert!(li.contains("LinkedIn post"));
+        assert!(li.contains("ONLY the markdown body"));
+        assert!(li.contains("NO markdown"));
+        // X thread: the ~270 char rule is the platform marker
+        let x = multiply_system_prompt(source, DocType::XThread, "X thread", None);
+        assert!(x.contains("270"));
+        // a target without specific guidance still produces a valid prompt
+        let generic = multiply_system_prompt(source, DocType::Generic, "document", None);
+        assert!(generic.contains("ONLY the markdown body"));
+    }
+
+    #[test]
+    fn multiply_prompt_voice_after_guidance() {
+        // voice is style-only and must come after the platform format rules
+        let prompt = multiply_system_prompt(
+            "src",
+            DocType::LinkedinPost,
+            "LinkedIn post",
+            Some("flowery and verbose"),
+        );
+        let guidance = prompt.find("NO markdown").unwrap();
+        let voice = prompt.find("Voice & tone").unwrap();
+        assert!(guidance < voice);
+    }
+
+    #[test]
     fn voice_injected_into_all_surfaces_when_set() {
         let v = Some("terse, lowercase, dry wit");
         assert!(system_prompt("doc", v).contains("terse, lowercase, dry wit"));
         assert!(inline_system_prompt("doc", "sel", v).contains("terse, lowercase, dry wit"));
         assert!(expand_system_prompt("idea", "Blog Post", v).contains("terse, lowercase, dry wit"));
+        assert!(
+            multiply_system_prompt("doc", DocType::BlogPost, "Blog Post", v)
+                .contains("terse, lowercase, dry wit")
+        );
     }
 
     #[test]
