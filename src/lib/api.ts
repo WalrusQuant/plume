@@ -32,6 +32,21 @@ export interface Folder {
   updatedAt: string;
 }
 
+/** A full-text search result row. `snippet` is a highlighted excerpt with `[ ]`
+    around matched terms (plain text, not HTML). */
+export interface SearchHit {
+  id: string;
+  name: string;
+  type: DocType;
+  snippet: string;
+}
+
+/** An @-mentioned document attached to a chat message as background context. */
+export interface DocReference {
+  name: string;
+  content: string;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -92,6 +107,8 @@ export const api = {
     invoke<string>("get_document_content", { id }),
   saveDocumentContent: (id: string, content: string) =>
     invoke<void>("save_document_content", { id, content }),
+  searchDocuments: (query: string) =>
+    invoke<SearchHit[]>("search_documents", { query }),
 
   renderPreview: (content: string) => invoke<string>("render_preview", { content }),
   renderLinkedinPreview: (content: string) =>
@@ -139,6 +156,7 @@ export const api = {
     model: string | null,
     messages: ChatMessage[],
     documentContent: string,
+    references: DocReference[],
     voice: string | null,
   ) =>
     invoke<void>("send_assistant_message", {
@@ -147,6 +165,7 @@ export const api = {
       model,
       messages,
       documentContent,
+      references,
       voice,
     }),
   sendInlineEdit: (

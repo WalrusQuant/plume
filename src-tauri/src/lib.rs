@@ -35,6 +35,7 @@ pub fn run() {
             commands::delete_document,
             commands::get_document_content,
             commands::save_document_content,
+            commands::search_documents,
             commands::render_preview,
             commands::render_linkedin_preview,
             commands::render_x_thread_preview,

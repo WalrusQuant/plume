@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { api, type AIProvider, type Chat, type ChatMessage } from "$lib/api";
+import { api, type AIProvider, type Chat, type ChatMessage, type DocReference } from "$lib/api";
 
 const SETTINGS_KEY = "markdown-ai-settings";
 /** Must match storage.rs::DEFAULT_CHAT_TITLE — signals an un-titled chat. */
@@ -192,7 +192,7 @@ class AssistantStore {
     }
   }
 
-  async send(userMessage: string, documentContent: string) {
+  async send(userMessage: string, documentContent: string, references: DocReference[] = []) {
     if (this.isStreaming || !this.activeChatId) return;
     // auto-title a still-default chat from its first message
     const chat = this.activeChat;
@@ -209,6 +209,7 @@ class AssistantStore {
         this.settings.model || null,
         $state.snapshot(this.messages),
         documentContent,
+        references,
         this.settings.voice || null,
       );
     } catch (e) {
