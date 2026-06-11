@@ -1,13 +1,29 @@
 # v2 Roadmap — from markdown editor to content operation
 
-> Status: **PLANNING ONLY — nothing approved for build.** Nine features, ordered
-> easiest → most complex. Each entry: what it is, how to implement it against
-> the current codebase, effort, dependencies, and open decisions.
+> Status (updated 2026-06-10): **#1–6 shipped.** Remaining work is split into
+> two releases. **v2 (the sellable release):** #7 Stage A + #9 — a fully
+> local-first product. **v2.5:** #8 publishing + #7 Stage B — the network/API
+> layer, carved out so it never gates the v2 ship. See "Release plan" at the
+> bottom. Each feature entry below keeps its full implementation notes.
 >
 > Theme: v1 helps you *write* a document. v2 helps you run a *content
-> operation* — multiply one piece across platforms, in your own voice, and
-> track it from idea to published. Features 1–7 are independent bricks;
-> 8 and 9 are the payoff that assembles them.
+> operation* — multiply one piece across platforms, in your own voice. v2.5
+> closes the loop by publishing directly to the platforms.
+>
+> **Why publishing moved to v2.5:** it's the only feature that reaches outside
+> the machine — third-party APIs, per-platform credentials, ongoing
+> maintenance when those APIs change. Everything in v2 is local and
+> self-contained, so v2 can ship on our own timeline. And publishing isn't the
+> differentiator — multiplication is. "Publish everywhere" is already honored
+> in v2 through clipboard/file export; API publishing is a convenience layer.
+>
+> **Why #9 is now cheap:** content multiplication is the same primitive as the
+> shipped idea-expand feature (#5), generalized. `start_expand_stream` already
+> takes source text + a target label and streams output into a doc; multiply
+> is "source = a finished doc, targets = N, outputs = linked docs." The
+> streaming plumbing, voice injection, and land-output-in-a-new-doc path all
+> exist — net-new is the `derived_from` link, per-target prompts, and a
+> multi-target flow.
 
 ## Order at a glance
 
@@ -19,15 +35,17 @@
 | 4 | Inline AI edit (selection menu) | Medium | none | #2 strongly recommended | ✅ done 2026-06-10 (selection menu, click-driven) |
 | 5 | Idea inbox / quick capture | Medium | migration v5 | — | ✅ done 2026-06-10 (click-driven Inbox; redesigned to notes-in-a-modal, PR #6) |
 | 6 | Voice profile | Medium | none | — | ✅ done 2026-06-10 (shipped as a global Voice & tone setting injected into all prompts; exemplar-picker + AI distillation deferred) |
-| 7 | Cross-document memory (search + AI recall) | Med-High | FTS5 migration | — |
-| 8 | Pipeline & publishing | High | migration(s) | — |
-| 9 | Content multiplication | High | small migration | #6, ideally #7 + #8 |
+| 7A | Cross-doc search + @-mention | Med-Low | FTS5 migration | — | **v2** |
+| 9 | Content multiplication | Medium | small migration | #6 ✅ (builds on #5 ✅) | **v2** |
+| 7B | AI recall (search tool-loop) | High | none (uses 7A) | #7A | v2.5 |
+| 8 | Pipeline & publishing | High | migration(s) | — | v2.5 |
 
-Rationale for the order: 1–3 are contained wins (one renderer, one table, one
-refactor) that build muscle for the bigger ones. 4 is the first "wow" feature
-and needs 2 as its safety net. 5–7 are independent mid-size features that can
-be reshuffled freely. 8 and 9 are large and benefit from everything before
-them — and 9 is the moat, so everything funnels toward it.
+Rationale for the order: 1–6 shipped 2026-06-10. The v2 release adds #7A
+(searchable corpus — table stakes for a writing tool) and #9 (the moat,
+cheap now that idea-expand exists). v2.5 takes on the two features that carry
+real external cost or complexity: #8 (third-party publishing APIs) and #7B
+(the multi-turn tool-use loop that rewrites the SSE path). Neither blocks a
+sellable v2.
 
 ---
 
@@ -277,6 +295,9 @@ vs manual-only (start manual).
 
 ## 7. Cross-document memory (search + AI recall)
 
+> **Release split (2026-06-10):** Stage A (search + @-mention) → **v2**.
+> Stage B (AI search tool-loop) → **v2.5**.
+
 **What:** Two stages. (a) Full-text search across all docs (table stakes).
 (b) The assistant can *consult* the corpus: "what have I written about
 pricing?", "link my older post on this" — via a search tool it can call.
@@ -318,6 +339,9 @@ visibility shows users the cost of stuffed context.
 ---
 
 ## 8. Pipeline & publishing
+
+> **Release (2026-06-10): deferred to v2.5.** Only feature that touches
+> third-party APIs/credentials; carved out so it never gates the v2 ship.
 
 **What:** Docs get a workflow status (idea → drafting → review → published)
 and a per-platform publish record (where, when, URL). Sidebar gains a
@@ -363,6 +387,12 @@ each. **Decisions:** which platform first (Ghost recommended); whether
 
 ## 9. Content multiplication
 
+> **Release (2026-06-10): pulled into v2.** Now cheap — it's the shipped
+> idea-expand primitive (#5) generalized: source is a finished doc, targets
+> are N, outputs are linked docs. Reuse `start_expand_stream` + tagged-stream
+> plumbing; net-new is `derived_from`, per-target prompts, and the multi-target
+> flow. Hard prerequisite #6 (Voice) is done.
+
 **What:** The capstone. From a finished source doc: "Generate the
 newsletter version, a LinkedIn post, and an X thread." Each derivative is a
 *linked document* (not a throwaway export), platform-native in tone and
@@ -401,10 +431,41 @@ knowledge lives in prompts vs renderer post-processing (start prompts-only).
 
 ---
 
-## Suggested release grouping
+## Release plan (revised 2026-06-10)
 
-- **v2.0 — "the writing partner":** #1, #2, #3, #4 (exports + safety net +
-  chat upgrade + inline edit). Shippable story: "AI edits your text where
-  you write, safely."
-- **v2.1 — "your voice, your corpus":** #5, #6, #7-A (+@-mention).
-- **v2.2 — "the content operation":** #7-B, #8, #9.
+### Shipped — #1–6 (2026-06-10)
+X thread + X Article export, document snapshots/history, multiple chats +
+token visibility, inline AI edit, idea inbox, global Voice & tone. These went
+out across PRs #1–#7.
+
+### v2 — "the content operation" (the sellable release)
+Fully local-first; nothing here reaches a third-party API.
+
+- **#7 Stage A — cross-document search + @-mention.** SQLite FTS5 over
+  `documents` (explicit upserts in the storage write path), a sidebar search
+  box, and @-mention to pull a doc's content into the chat's system prompt.
+  Table stakes for a corpus-based writing tool; cheap. **Stage B (the AI
+  search tool-loop) is explicitly deferred to v2.5.**
+- **#9 — content multiplication.** The moat: from a finished doc, generate
+  platform-native derivatives (newsletter, LinkedIn, X thread), each a *linked*
+  editable document (`derived_from`), in the user's voice (#6). **Builds
+  directly on the shipped idea-expand primitive (#5)** — reuse
+  `start_expand_stream`/tagged-stream-id plumbing; net-new is the
+  `derived_from` column + sidebar nesting, per-target adaptation prompts, and
+  the "Multiply…" multi-target flow.
+- **Polish backlog to clear before the release:** context compaction (long
+  threads), an assistant hardening pass, docx polish round 2.
+
+Story: "Write it once. Get every platform's native version, in your voice —
+all on your machine."
+
+### v2.5 — "publish everywhere" (the network layer)
+The deferred features that carry external dependencies or heavy complexity.
+
+- **#8 — pipeline & publishing.** Doc workflow status + a `publications`
+  table; manual "mark as published" first, then direct API publishing one
+  platform at a time (Ghost first). The only feature that needs third-party
+  credentials and ongoing API maintenance.
+- **#7 Stage B — AI recall.** The assistant calls a `search_documents` tool
+  mid-conversation; turns the SSE stream into a multi-turn tool-use loop (the
+  biggest change to `ai.rs` since v1). Sits on top of #7A's FTS table.
