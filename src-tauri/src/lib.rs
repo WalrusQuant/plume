@@ -29,6 +29,8 @@ pub fn run() {
             commands::list_documents,
             commands::create_document,
             commands::rename_document,
+            commands::update_idea_name,
+            commands::update_document_type,
             commands::move_document,
             commands::delete_document,
             commands::get_document_content,
