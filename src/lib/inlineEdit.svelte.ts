@@ -326,6 +326,7 @@ class InlineEditController {
         instruction,
         selectedText,
         this.getContent(),
+        assistant.settings.voice || null,
       )
       .catch((e) => {
         toast.error(`Inline edit failed: ${e}`);

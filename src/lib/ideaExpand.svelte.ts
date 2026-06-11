@@ -80,7 +80,14 @@ class IdeaExpandController {
     });
     // model: null → backend uses the provider's default (strong) model
     api
-      .sendIdeaExpand(this.activeStreamId, assistant.settings.provider, null, idea, targetLabel)
+      .sendIdeaExpand(
+        this.activeStreamId,
+        assistant.settings.provider,
+        null,
+        idea,
+        targetLabel,
+        assistant.settings.voice || null,
+      )
       .catch((e) => this.fail(e instanceof Error ? e : new Error(String(e))));
     return promise;
   }
