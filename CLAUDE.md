@@ -29,24 +29,43 @@ second markdown engine.
 src-tauri/src/
   lib.rs        Tauri setup: DB at app_data_dir/markdown.db, command registry
   storage.rs    schema + PRAGMA user_version migrations (APPEND-ONLY list),
-                doc/folder/chat CRUD as plain fns over &Connection (testable)
+                CRUD as plain fns over &Connection (testable) for docs/folders/
+                chats/chat_messages/snapshots; DocType enum, title_explicit flag
   commands.rs   thin #[tauri::command] wrappers; Db(Mutex<Connection>) state
   preview.rs    comrak options + render_html (frontmatter stripped, raw HTML
                 escaped — preview pane has IPC access, keep it escaped)
   ai.rs         providers (Anthropic /v1/messages + OpenRouter
                 /chat/completions), reqwest SSE → events assistant:token/
-                done/error, abortable task in AiState, key storage
-  export/       linkedin.rs (Unicode clipboard text), html.rs (self-contained
-                doc), docx.rs (structural docx-rs build)
+                done/error, abortable task in AiState, key storage. Three
+                stream entry points (chat, inline edit, idea expand), each
+                with its own system prompt; voice_section() injects the global
+                Voice & tone into all three. Token usage parsed from SSE.
+  export/       linkedin.rs (Unicode clipboard text), x.rs (x-thread numbered
+                ≤280-char posts + x-article rich HTML paste), html.rs (self-
+                contained doc), docx.rs (structural docx-rs build); mod.rs
+                holds the TARGETS list + ExportOutput enum (Clipboard /
+                ClipboardHtml rich-paste / File / Cancelled)
   error.rs      thiserror enum, serialized as message string over IPC
 
 src/
   lib/api.ts            typed invoke() wrappers — keep 1:1 with commands
-  lib/assistant.svelte.ts  chat rune store (per-doc threads, persisted)
+  lib/assistant.svelte.ts  chat rune store (multi-thread per doc, token usage,
+                        persisted settings incl. Voice & tone)
+  lib/inlineEdit.svelte.ts  selection-menu AI edit: streamed preview, accept/
+                        reject against the CodeMirror selection
+  lib/ideaExpand.svelte.ts  idea-inbox expansion stream controller
+  lib/buildSidebarTree.ts   folder/doc/Inbox tree assembly for the sidebar
+  lib/documentTypes.ts  per-type metadata (icon, label) — add a type here
+  lib/templates.ts      starter bodies per document type
+  lib/editor/           CodeMirror setup: formatting.ts (toolbar commands),
+                        themes.ts (light/dark)
   lib/toast.svelte.ts   error toasts — wrap new async UI ops in run(p, what)
-  lib/components/       Svelte 5 components (props via $props, runes only)
+  lib/components/       Svelte 5 components (props via $props, runes only).
+                        Right pane is tabbed via RightPaneTabs.svelte:
+                        Preview / Assistant / History (HistoryPanel = snapshot
+                        restore). IdeaCaptureModal = quick-capture (see below).
   routes/+page.svelte   app shell: doc state, debounced save (500ms) +
-                        preview (150ms), export, settings
+                        preview (150ms), export, settings, right-pane tab
 ```
 
 ## Conventions & invariants
@@ -55,6 +74,19 @@ src/
   `storage.rs::MIGRATIONS`; add a new one.
 - Document `type` is a Rust enum (kebab-case serde); adding a type = one
   variant + frontend `documentTypes.ts` entry, no migration.
+- **Ideas are notes, not editor docs.** The `idea` DocType is captured and
+  edited only through `IdeaCaptureModal` (never the main editor); it lives in
+  the Inbox, and is promoted to a real doc via `update_document_type`. See the
+  [[ideas-are-notes]] memory.
+- `title_explicit` (documents column) distinguishes a user-set title from a
+  derived one (ideas default their name to the first line). The capture/rename
+  paths set it; don't overwrite an explicit title with a derived one.
+- **Voice & tone is global**, stored in the persisted assistant settings and
+  passed as the `voice` arg to every AI stream command. `ai.rs::voice_section`
+  appends it to all three system prompts; it must never override mechanical
+  rules (e.g. inline edit's "return only the replacement text").
+- Snapshots are append-only history rows (`SnapshotCause` enum). History is
+  restore-only — never mutate or delete past snapshots.
 - **AI keys never touch the webview.** Release builds use the OS keychain;
   debug builds use `dev-keys.json` in app data dir (keychain re-prompts on
   every dev rebuild — do not "fix" this back to keychain).
