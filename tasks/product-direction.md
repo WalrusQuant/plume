@@ -82,11 +82,12 @@ costume. The shelf shows *what exists and what's fresh*, never a workflow engine
 Same rule that says "cut the publishing pipeline" says "don't rebuild Linear."
 
 ## Monetization
-**Warp-style.** Closed source; **free offline editor** (no AI, no account, no
-BYOK); **paid monthly sub** bundling **managed AI + sync**, with tokens hidden
-behind a generous fair-use allowance. Resell a cheap model (MiMo-V2.5-Pro) at a
-markup; self-host later at scale. Open-source is a later lever. Full details +
-cost basis in `tasks/monetization.md`.
+**BYOK + flat one-time fee** (reversed from the Warp-style sub on 2026-06-11).
+Closed source; **one-time purchase unlocks the full app**, AI runs on the
+user's **own API key** — no subscription, no managed AI service, no token
+reselling. **Sync is deferred** and only built if buyers ask for it. No
+variable cost per user; matches the existing keychain-BYOK architecture.
+Open-source stays a later lever. Full details in `tasks/monetization.md`.
 
 ## Risks to keep honest
 - Adjacent threat isn't a competitor, it's **"just use Obsidian + ChatGPT."**
