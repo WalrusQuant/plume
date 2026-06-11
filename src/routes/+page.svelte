@@ -11,6 +11,7 @@
   import Preview from "$lib/components/Preview.svelte";
   import StatusBar from "$lib/components/StatusBar.svelte";
   import NewDocumentDialog from "$lib/components/NewDocumentDialog.svelte";
+  import IdeaCaptureModal from "$lib/components/IdeaCaptureModal.svelte";
   import RightPaneTabs, { type RightPaneTab } from "$lib/components/RightPaneTabs.svelte";
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
@@ -98,11 +99,6 @@
       }
       const doc = documents.find((d) => d.id === id);
       if (doc) doc.updatedAt = new Date().toISOString();
-      // an idea is titled by its first line (notes-app style) — keep in sync
-      if (doc && doc.type === "idea") {
-        const name = deriveIdeaName(content);
-        if (name !== doc.name) run(renameDocument(id, name), "Rename idea");
-      }
       maybeIntervalSnapshot(id, content);
     }
   }
@@ -263,12 +259,26 @@
   }
 
   // ----- idea inbox -----
+  //
+  // Ideas are quick notes, never opened in the big editor. They're captured and
+  // edited in a small modal (the open document never changes underneath you),
+  // and have three verbs: expand with AI, convert to a document, delete.
 
   /** Id of the idea currently being expanded — drives the sidebar spinner. */
   let expandingId = $state<string | null>(null);
+  /** Target label of the in-flight expansion, e.g. "Blog Post". */
+  let expandingLabel = $state("");
 
-  /** An idea's title is its first non-empty line (markdown heading marks
-      stripped); empty → "New idea". */
+  // Capture/edit modal state. A row is created only on save, so abandoning the
+  // modal leaves no empty idea behind.
+  let ideaModalOpen = $state(false);
+  let ideaModalMode = $state<"new" | "edit">("new");
+  let ideaModalId = $state<string | null>(null);
+  let ideaModalTitle = $state("");
+  let ideaModalBody = $state("");
+
+  /** A derived idea title is its first non-empty line (markdown heading marks
+      stripped); empty → "New idea". Used only when no explicit title is set. */
   function deriveIdeaName(content: string): string {
     const firstLine = content.split("\n").find((l) => l.trim()) ?? "";
     const cleaned = firstLine.replace(/^#+\s*/, "").trim();
@@ -276,29 +286,82 @@
     return cleaned.length > 40 ? `${cleaned.slice(0, 40)}…` : cleaned;
   }
 
-  /** "+ New idea": create a blank idea and open it for immediate capture. */
+  /** "+ New idea": open the capture modal. No row is created until save. */
   function newIdea() {
-    run(createDocument("New idea", "idea"), "New idea");
+    ideaModalMode = "new";
+    ideaModalId = null;
+    ideaModalTitle = "";
+    ideaModalBody = "";
+    ideaModalOpen = true;
+  }
+
+  /** Click an idea: load it into the capture modal — without selecting it into
+      the big editor. Only seed the title field if it's explicit; seeding a
+      derived name would lock it explicit on save and freeze auto-follow. */
+  async function openIdea(id: string) {
+    const idea = documents.find((d) => d.id === id);
+    const body = await api.getDocumentContent(id);
+    ideaModalMode = "edit";
+    ideaModalId = id;
+    ideaModalTitle = idea?.titleExplicit ? idea.name : "";
+    ideaModalBody = body;
+    ideaModalOpen = true;
+  }
+
+  /** Save the capture modal. title === "" means "derive from the first line".
+      Bypasses the editor save loop, so the open document is untouched. */
+  async function saveIdea(title: string, body: string) {
+    const explicit = title.length > 0;
+    const name = explicit ? title : deriveIdeaName(body);
+    if (ideaModalMode === "new") {
+      if (!explicit && !body.trim()) return; // nothing to capture
+      const doc = await api.createDocument(name, "idea", body);
+      documents = [doc, ...documents];
+      if (explicit) {
+        const updated = await api.updateIdeaName(doc.id, name, true);
+        documents = documents.map((d) => (d.id === doc.id ? updated : d));
+      }
+    } else if (ideaModalId) {
+      const id = ideaModalId;
+      await api.saveDocumentContent(id, body);
+      const updated = await api.updateIdeaName(id, name, explicit);
+      documents = documents.map((d) => (d.id === id ? updated : d));
+    }
+  }
+
+  /** Convert an idea into a real document of `type`, as-is (no AI). It leaves
+      the Inbox (which filters on type). Stays on the current open document. */
+  async function convertIdea(ideaId: string, type: DocType) {
+    const idea = documents.find((d) => d.id === ideaId);
+    if (!idea) return;
+    const body = await api.getDocumentContent(ideaId);
+    if (!body.trim()) {
+      toast.error("Add some text to the idea before converting it.");
+      return;
+    }
+    const updated = await api.updateDocumentType(ideaId, type, idea.name, true);
+    documents = documents.map((d) => (d.id === ideaId ? updated : d));
   }
 
   /** Expand an idea into a full draft of `type`, then open the draft. The idea
       itself is kept in the Inbox. */
   async function expandIdea(ideaId: string, type: DocType, label: string) {
     const idea = documents.find((d) => d.id === ideaId);
-    // flush so a just-typed idea (still in the debounce window) is read in full
-    await flushSave();
     const ideaText = await api.getDocumentContent(ideaId);
     if (!ideaText.trim()) {
       toast.error("Add some text to the idea before expanding it.");
       return;
     }
     expandingId = ideaId;
+    expandingLabel = label;
     try {
       const draft = await ideaExpand.expand(ideaText, label);
-      const name = idea && idea.name !== "New idea" ? `${idea.name} — ${label}` : `${label} draft`;
+      const name = idea?.titleExplicit ? `${idea.name} — ${label}` : `${label} draft`;
       await createDocument(name, type, draft);
+      toast.show(`Draft created: ${name}`, "info");
     } finally {
       expandingId = null;
+      expandingLabel = "";
     }
   }
 
@@ -316,10 +379,14 @@
     await api.deleteDocument(id);
     pendingSaves.delete(id); // never retry a save against a deleted row
     documents = documents.filter((d) => d.id !== id);
+    // if the deleted idea is open in the capture modal, close it
+    if (ideaModalId === id) ideaModalOpen = false;
     if (selectedDocId === id) {
       selectedDocId = null;
-      if (documents.length > 0) {
-        await selectDocument(documents[0].id);
+      // fall back to the first real document — ideas never open in the editor
+      const next = documents.find((d) => d.type !== "idea");
+      if (next) {
+        await selectDocument(next.id);
       } else {
         void assistant.loadFor(null);
       }
@@ -395,10 +462,13 @@
     {folders}
     {selectedDocId}
     {expandingId}
+    {expandingLabel}
     onSelect={(id) => run(selectDocument(id), "Opening document")}
     onNewDocument={() => (dialogOpen = true)}
     onNewIdea={newIdea}
+    onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
     onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
+    onConvertIdea={(id, type) => run(convertIdea(id, type), "Convert idea")}
     onRename={(id, name) => run(renameDocument(id, name), "Rename")}
     onDelete={(id) => run(deleteDocument(id), "Delete")}
     onMoveDocument={(id, folderId) => run(moveDocument(id, folderId), "Move")}
@@ -410,6 +480,14 @@
     open={dialogOpen}
     onClose={() => (dialogOpen = false)}
     onCreate={(name, type) => run(createDocument(name, type), "Create document")}
+  />
+  <IdeaCaptureModal
+    open={ideaModalOpen}
+    mode={ideaModalMode}
+    initialTitle={ideaModalTitle}
+    initialBody={ideaModalBody}
+    onSave={(title, body) => run(saveIdea(title, body), "Save idea")}
+    onClose={() => (ideaModalOpen = false)}
   />
   <SettingsDialog open={settingsOpen} onClose={() => (settingsOpen = false)} />
   <Toasts />

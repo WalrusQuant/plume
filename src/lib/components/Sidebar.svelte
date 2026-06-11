@@ -2,6 +2,7 @@
   import { confirm } from "@tauri-apps/plugin-dialog";
   import type { DocType, Document, Folder } from "$lib/api";
   import { buildSidebarTree } from "$lib/buildSidebarTree";
+  import { DOCUMENT_TYPES } from "$lib/documentTypes";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
   import MoveToFolderMenu from "$lib/components/MoveToFolderMenu.svelte";
 
@@ -10,10 +11,13 @@
     folders: Folder[];
     selectedDocId: string | null;
     expandingId: string | null;
+    expandingLabel: string;
     onSelect: (id: string) => void;
     onNewDocument: () => void;
     onNewIdea: () => void;
+    onOpenIdea: (id: string) => void;
     onExpandIdea: (id: string, type: DocType, label: string) => void;
+    onConvertIdea: (id: string, type: DocType) => void;
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
     onMoveDocument: (id: string, folderId: string | null) => void;
@@ -27,10 +31,13 @@
     folders,
     selectedDocId,
     expandingId,
+    expandingLabel,
     onSelect,
     onNewDocument,
     onNewIdea,
+    onOpenIdea,
     onExpandIdea,
+    onConvertIdea,
     onRename,
     onDelete,
     onMoveDocument,
@@ -46,7 +53,21 @@
     { type: "linkedin-post", label: "LinkedIn Post" },
     { type: "x-thread", label: "X Thread" },
   ];
+  /** Idea → document types it can be converted to as-is (no AI). All non-idea
+      types qualify. */
+  const CONVERT_TARGETS = DOCUMENT_TYPES;
   let expandMenuId = $state<string | null>(null);
+  let convertMenuId = $state<string | null>(null);
+
+  function toggleExpandMenu(id: string) {
+    convertMenuId = null;
+    expandMenuId = expandMenuId === id ? null : id;
+  }
+
+  function toggleConvertMenu(id: string) {
+    expandMenuId = null;
+    convertMenuId = convertMenuId === id ? null : id;
+  }
 
   let editingId = $state<string | null>(null);
   let editName = $state("");
@@ -205,8 +226,8 @@
 {#snippet ideaItem(doc: Document)}
   <div
     class="sidebar-item {doc.id === selectedDocId ? 'sidebar-item--active' : ''}"
-    onclick={() => onSelect(doc.id)}
-    onkeydown={(e) => e.key === "Enter" && onSelect(doc.id)}
+    onclick={() => onOpenIdea(doc.id)}
+    onkeydown={(e) => e.key === "Enter" && onOpenIdea(doc.id)}
     role="button"
     tabindex="0"
   >
@@ -214,9 +235,12 @@
       <DocumentIcon type={doc.type} size={16} />
     </div>
     <div class="sidebar-item-info">
-      <!-- an idea is titled by its first line; rename by editing the text -->
       <span class="sidebar-item-name">{doc.name}</span>
-      <span class="sidebar-item-date">{formatDate(doc.updatedAt)}</span>
+      {#if expandingId === doc.id}
+        <span class="sidebar-idea-expanding">Expanding into {expandingLabel}…</span>
+      {:else}
+        <span class="sidebar-item-date">{formatDate(doc.updatedAt)}</span>
+      {/if}
     </div>
     {#if expandingId === doc.id}
       <div class="sidebar-idea-spinner" title="Expanding…"></div>
@@ -226,12 +250,24 @@
             class="sidebar-action-btn"
             onclick={(e) => {
               e.stopPropagation();
-              expandMenuId = expandMenuId === doc.id ? null : doc.id;
+              toggleExpandMenu(doc.id);
             }}
             title="Expand with AI"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z" />
+            </svg>
+          </button>
+          <button
+            class="sidebar-action-btn"
+            onclick={(e) => {
+              e.stopPropagation();
+              toggleConvertMenu(doc.id);
+            }}
+            title="Convert to document"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14M13 6l6 6-6 6" />
             </svg>
           </button>
           <button
@@ -258,6 +294,23 @@
           onclick={() => {
             expandMenuId = null;
             onExpandIdea(doc.id, target.type, target.label);
+          }}
+        >
+          <DocumentIcon type={target.type} size={14} />
+          {target.label}
+        </button>
+      {/each}
+    </div>
+  {/if}
+  {#if convertMenuId === doc.id}
+    <div class="sidebar-expand-menu">
+      <span class="sidebar-expand-menu-label">Convert to…</span>
+      {#each CONVERT_TARGETS as target (target.type)}
+        <button
+          class="sidebar-expand-menu-item"
+          onclick={() => {
+            convertMenuId = null;
+            onConvertIdea(doc.id, target.type);
           }}
         >
           <DocumentIcon type={target.type} size={14} />
