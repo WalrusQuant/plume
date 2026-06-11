@@ -12,15 +12,29 @@ blogs, newsletters, LinkedIn, X.
 - **Markdown editor** — CodeMirror 6 with syntax highlighting, formatting
   toolbar, keyboard shortcuts (⌘B/I/K/E), and line wrapping built for prose
 - **Live preview** — GitHub-flavored markdown (tables, task lists,
-  footnotes) rendered by the same engine that drives every export, plus a
-  **LinkedIn mode** that shows exactly what the clipboard export will paste
+  footnotes) rendered by the same engine that drives every export, with a
+  per-platform preview (LinkedIn, X thread, X Article) that shows exactly
+  what the clipboard export will paste
 - **AI writing partner** — streaming chat with your document as context;
-  per-document conversations persist across restarts; insert suggestions at
-  the cursor or replace the whole document with one click. Works with
-  **Anthropic** or **OpenRouter** (any model they serve)
+  **multiple conversations per document** with input/output token usage shown;
+  threads persist across restarts; insert suggestions at the cursor or replace
+  the whole document with one click. Works with **Anthropic** or **OpenRouter**
+  (any model they serve)
+- **Inline AI edit** — select text, get a streamed rewrite previewed in place,
+  then accept or reject — no copy-paste round trip through the chat
+- **Voice & tone** — describe how your writing should sound once in settings;
+  it's injected into every AI request (chat, inline edit, idea expansion) so
+  generated text sounds like you
+- **Idea inbox** — capture a half-formed idea in a quick modal without leaving
+  what you're writing, optionally let AI expand it into a draft, then convert
+  it into a real document when you're ready
+- **Version history** — automatic document snapshots you can browse and restore
 - **Export anywhere**
   - **LinkedIn** — clipboard-ready text with Unicode bold/italic, real
     bullets, and flattened links (formatting survives the paste)
+  - **X (Twitter)** — *thread* mode segments the doc into numbered ≤280-char
+    posts (code blocks intact, links flattened); *Article* mode is a rich HTML
+    paste matching what the X Article composer keeps
   - **HTML** — clean, self-contained semantic document with dark-mode support
   - **Word (.docx)** — real document structure: heading styles, tables,
     lists, code blocks
@@ -78,6 +92,9 @@ Notes for development builds:
 
 v1 (complete): editor + AI assistant + LinkedIn/HTML/docx export.
 
-Next up: X Article rich-paste export, multiple chats per document,
-token/context visibility, compaction. Later: direct API publishing
-(Ghost, beehiiv, Dev.to), AI-adapted per-platform export, PDF/EPUB.
+v2 (shipped): X thread + X Article export, multiple chats per document with
+token usage, version history + restore, inline AI edit, idea inbox, global
+Voice & tone.
+
+Next up: context compaction. Later: direct API publishing (Ghost, beehiiv,
+Dev.to), AI-adapted per-platform export, PDF/EPUB.
