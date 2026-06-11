@@ -81,16 +81,12 @@ kanban / due dates tempt you, that's the pipeline mistake wearing a planning
 costume. The shelf shows *what exists and what's fresh*, never a workflow engine.
 Same rule that says "cut the publishing pipeline" says "don't rebuild Linear."
 
-## Monetization (open, but a lean)
-Local-first + bring-your-own-key = ~no server cost and ~no recurring value to
-hang a subscription on. So:
-- **Lean: one-time purchase** (indie Mac-app model — Things / iA Writer). Fits
-  local-first; paid major-version upgrades for recurring revenue; no churn or
-  infra to manage solo.
-- **Future optional recurring:** encrypted **sync/backup** (corpus on laptop +
-  desktop). The one thing this audience pays recurring for — and it also fixes
-  the "desktop-only" friction. Does NOT drag you back into publishing APIs.
-- **Marketing writes itself:** build Plume in public, using Plume.
+## Monetization
+**Warp-style.** Closed source; **free offline editor** (no AI, no account, no
+BYOK); **paid monthly sub** bundling **managed AI + sync**, with tokens hidden
+behind a generous fair-use allowance. Resell a cheap model (MiMo-V2.5-Pro) at a
+markup; self-host later at scale. Open-source is a later lever. Full details +
+cost basis in `tasks/monetization.md`.
 
 ## Risks to keep honest
 - Adjacent threat isn't a competitor, it's **"just use Obsidian + ChatGPT."**
