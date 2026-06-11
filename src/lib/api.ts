@@ -139,8 +139,16 @@ export const api = {
     model: string | null,
     messages: ChatMessage[],
     documentContent: string,
+    voice: string | null,
   ) =>
-    invoke<void>("send_assistant_message", { streamId, provider, model, messages, documentContent }),
+    invoke<void>("send_assistant_message", {
+      streamId,
+      provider,
+      model,
+      messages,
+      documentContent,
+      voice,
+    }),
   sendInlineEdit: (
     streamId: string,
     provider: AIProvider,
@@ -148,6 +156,7 @@ export const api = {
     instruction: string,
     selectedText: string,
     documentContent: string,
+    voice: string | null,
   ) =>
     invoke<void>("send_inline_edit", {
       streamId,
@@ -156,6 +165,7 @@ export const api = {
       instruction,
       selectedText,
       documentContent,
+      voice,
     }),
   sendIdeaExpand: (
     streamId: string,
@@ -163,7 +173,8 @@ export const api = {
     model: string | null,
     idea: string,
     targetLabel: string,
+    voice: string | null,
   ) =>
-    invoke<void>("send_idea_expand", { streamId, provider, model, idea, targetLabel }),
+    invoke<void>("send_idea_expand", { streamId, provider, model, idea, targetLabel, voice }),
   stopAssistant: () => invoke<void>("stop_assistant"),
 };

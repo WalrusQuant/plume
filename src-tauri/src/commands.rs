@@ -268,6 +268,7 @@ pub fn delete_api_key(app: AppHandle, provider: Provider) -> Result<()> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn send_assistant_message(
     app: AppHandle,
     state: State<AiState>,
@@ -276,8 +277,9 @@ pub fn send_assistant_message(
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
+    voice: Option<String>,
 ) -> Result<()> {
-    ai::start_stream(app, &state, stream_id, provider, model, messages, document_content)
+    ai::start_stream(app, &state, stream_id, provider, model, messages, document_content, voice)
 }
 
 #[tauri::command]
@@ -291,6 +293,7 @@ pub fn send_inline_edit(
     instruction: String,
     selected_text: String,
     document_content: String,
+    voice: Option<String>,
 ) -> Result<()> {
     ai::start_inline_stream(
         app,
@@ -301,10 +304,12 @@ pub fn send_inline_edit(
         instruction,
         selected_text,
         document_content,
+        voice,
     )
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn send_idea_expand(
     app: AppHandle,
     state: State<AiState>,
@@ -313,8 +318,9 @@ pub fn send_idea_expand(
     model: Option<String>,
     idea: String,
     target_label: String,
+    voice: Option<String>,
 ) -> Result<()> {
-    ai::start_expand_stream(app, &state, stream_id, provider, model, idea, target_label)
+    ai::start_expand_stream(app, &state, stream_id, provider, model, idea, target_label, voice)
 }
 
 #[tauri::command]
