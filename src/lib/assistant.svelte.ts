@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api, type AIProvider, type Chat, type ChatMessage, type DocReference } from "$lib/api";
+import { toast } from "$lib/toast.svelte";
 
 const SETTINGS_KEY = "markdown-ai-settings";
 /** Must match storage.rs::DEFAULT_CHAT_TITLE — signals an un-titled chat. */
@@ -37,7 +38,25 @@ function loadSettings(): AISettings {
 function deriveTitle(text: string): string {
   const t = text.trim().replace(/\s+/g, " ");
   if (!t) return DEFAULT_CHAT_TITLE;
-  return t.length > 40 ? `${t.slice(0, 40)}…` : t;
+  // slice by code points so an emoji at the boundary isn't split in half
+  const points = [...t];
+  return points.length > 40 ? `${points.slice(0, 40).join("")}…` : t;
+}
+
+/** Build the API payload from the visible thread. Merges consecutive
+    same-role messages (e.g. after a stop before the first token, or an
+    errored turn) — the Anthropic API rejects non-alternating roles. */
+function toApiMessages(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    const last = out[out.length - 1];
+    if (last && last.role === m.role) {
+      last.content += `\n\n${m.content}`;
+    } else {
+      out.push({ role: m.role, content: m.content });
+    }
+  }
+  return out;
 }
 
 /** Payloads of the assistant:* events emitted by ai.rs. */
@@ -47,6 +66,9 @@ interface StreamToken {
 }
 interface StreamDone {
   id: string;
+  /** True when the stream was aborted (superseded by another AI action) —
+      the accumulated text is truncated, not a completed response. */
+  aborted?: boolean;
 }
 interface StreamError {
   id: string;
@@ -95,24 +117,32 @@ class AssistantStore {
         if (e.payload.id !== this.activeStreamId) return;
         this.activeStreamId = null;
         this.isStreaming = false;
+        // another AI action (inline edit, expand, multiply) took the single
+        // stream slot — what we have is a truncated reply, tell the user
+        if (e.payload.aborted) toast.error("Chat reply was interrupted by another AI action.");
         void this.persist();
       }),
       listen<StreamError>("assistant:error", (e) => {
-        // a matching done event follows and finishes the stream
+        // a matching done event follows and finishes the stream. Surface via
+        // toast — an "Error: …" pseudo-message would be persisted and replayed
+        // to the model as a genuine assistant turn.
         if (e.payload.id !== this.activeStreamId) return;
-        this.messages = [
-          ...this.messages,
-          { role: "assistant", content: `Error: ${e.payload.message}` },
-        ];
+        toast.error(`Assistant error: ${e.payload.message}`);
       }),
     ]);
   }
 
+  /** Monotonic guard for loadFor: rapid doc switches interleave fetches, and
+      without it the slower fetch can win and show the wrong doc's chats. */
+  private loadSeq = 0;
+
   /** Switch to a document: load its chats and open the most recent one. */
   async loadFor(docId: string | null) {
     if (docId === this.docId) return;
+    const seq = ++this.loadSeq;
     if (this.isStreaming) await this.stop();
     await this.persist();
+    if (seq !== this.loadSeq) return; // superseded by a newer switch
     this.docId = docId;
     if (!docId) {
       this.chats = [];
@@ -120,12 +150,16 @@ class AssistantStore {
       this.messages = [];
       return;
     }
-    this.chats = await api.listChats(docId);
-    if (this.chats.length === 0) {
-      this.chats = [await api.createChat(docId)];
+    let chats = await api.listChats(docId);
+    if (chats.length === 0) {
+      chats = [await api.createChat(docId)];
     }
-    this.activeChatId = this.chats[0].id;
-    this.messages = await api.getChatMessages(this.activeChatId);
+    if (seq !== this.loadSeq) return;
+    const messages = await api.getChatMessages(chats[0].id);
+    if (seq !== this.loadSeq) return;
+    this.chats = chats;
+    this.activeChatId = chats[0].id;
+    this.messages = messages;
   }
 
   async selectChat(chatId: string) {
@@ -207,13 +241,13 @@ class AssistantStore {
         this.activeStreamId,
         this.settings.provider,
         this.settings.model || null,
-        $state.snapshot(this.messages),
+        toApiMessages($state.snapshot(this.messages)),
         documentContent,
         references,
         this.settings.voice || null,
       );
     } catch (e) {
-      this.messages = [...this.messages, { role: "assistant", content: `Error: ${e}` }];
+      toast.error(`Sending message failed: ${e}`);
       this.isStreaming = false;
       this.activeStreamId = null;
     }

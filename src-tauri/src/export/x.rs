@@ -13,7 +13,11 @@
 
 use comrak::nodes::{AstNode, ListType, NodeValue};
 
-/// X's hard limit is 280 characters; reserve headroom for the " n/N" suffix.
+/// X's hard limit per post.
+const HARD_LIMIT: usize = 280;
+/// Default packing limit — headroom for the "\n\nn/N" suffix on threads of up
+/// to 999 posts. Longer threads re-pack with a smaller limit (see
+/// `render_thread`) so the wider suffix still fits within the hard limit.
 const MAX_POST_CHARS: usize = 270;
 /// Visual divider between posts in the single clipboard/preview blob.
 const POST_SEPARATOR: &str = "\n\n━━━━━\n\n";
@@ -37,9 +41,31 @@ fn char_len(s: &str) -> usize {
     s.chars().count()
 }
 
-/// Segment the document into numbered posts.
+/// Worst-case length of the "\n\nn/N" numbering suffix for a thread of `total`
+/// posts (a single-post thread is left unnumbered).
+fn suffix_len(total: usize) -> usize {
+    if total <= 1 {
+        return 0;
+    }
+    let digits = total.to_string().len();
+    2 + digits + 1 + digits // "\n\n" + n + "/" + N
+}
+
+/// Segment the document into numbered posts. Packs at MAX_POST_CHARS, then —
+/// if the thread is long enough that the numbering suffix would push posts
+/// past the 280 hard limit (≥1000 posts) — re-packs with a tighter limit.
 pub fn render_thread(content: &str) -> Vec<String> {
-    number(pack(collect_blocks(content)))
+    let blocks = collect_blocks(content);
+    let mut limit = MAX_POST_CHARS;
+    loop {
+        let posts = pack(&blocks, limit);
+        if posts.len() <= 1 || limit + suffix_len(posts.len()) <= HARD_LIMIT {
+            return number(posts);
+        }
+        // the limit strictly decreases each pass and suffix_len is bounded,
+        // so this converges in a couple of iterations
+        limit = HARD_LIMIT - suffix_len(posts.len());
+    }
 }
 
 /// The joined thread (numbered posts + dividers) — exactly what is copied.
@@ -311,20 +337,21 @@ fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
     out
 }
 
-/// Greedily pack blocks into posts, splitting any block that overflows.
-fn pack(blocks: Vec<Block>) -> Vec<String> {
+/// Greedily pack blocks into posts of at most `limit` chars, splitting any
+/// block that overflows.
+fn pack(blocks: &[Block], limit: usize) -> Vec<String> {
     let mut posts: Vec<String> = Vec::new();
     let mut current = String::new();
     for block in blocks {
         let pieces = match block.split {
-            Split::Never => vec![block.text],
-            Split::Words => split_by_words(&block.text),
-            Split::Lines => split_by_lines(&block.text),
+            Split::Never => vec![block.text.clone()],
+            Split::Words => split_by_words(&block.text, limit),
+            Split::Lines => split_by_lines(&block.text, limit),
         };
         for piece in pieces {
             // a blank line ("\n\n") joins consecutive blocks within a post
             let joined = char_len(&current) + 2 + char_len(&piece);
-            if !current.is_empty() && joined > MAX_POST_CHARS {
+            if !current.is_empty() && joined > limit {
                 posts.push(std::mem::take(&mut current));
             }
             if !current.is_empty() {
@@ -340,22 +367,22 @@ fn pack(blocks: Vec<Block>) -> Vec<String> {
     posts
 }
 
-fn split_by_words(text: &str) -> Vec<String> {
-    if char_len(text) <= MAX_POST_CHARS {
+fn split_by_words(text: &str, limit: usize) -> Vec<String> {
+    if char_len(text) <= limit {
         return vec![text.to_string()];
     }
     let mut chunks = Vec::new();
     let mut current = String::new();
     for word in text.split_whitespace() {
-        if char_len(word) > MAX_POST_CHARS {
+        if char_len(word) > limit {
             if !current.is_empty() {
                 chunks.push(std::mem::take(&mut current));
             }
-            chunks.extend(hard_split(word));
+            chunks.extend(hard_split(word, limit));
             continue;
         }
         let extra = if current.is_empty() { 0 } else { 1 };
-        if !current.is_empty() && char_len(&current) + extra + char_len(word) > MAX_POST_CHARS {
+        if !current.is_empty() && char_len(&current) + extra + char_len(word) > limit {
             chunks.push(std::mem::take(&mut current));
         }
         if !current.is_empty() {
@@ -369,22 +396,22 @@ fn split_by_words(text: &str) -> Vec<String> {
     chunks
 }
 
-fn split_by_lines(text: &str) -> Vec<String> {
-    if char_len(text) <= MAX_POST_CHARS {
+fn split_by_lines(text: &str, limit: usize) -> Vec<String> {
+    if char_len(text) <= limit {
         return vec![text.to_string()];
     }
     let mut chunks = Vec::new();
     let mut current = String::new();
     for line in text.lines() {
-        if char_len(line) > MAX_POST_CHARS {
+        if char_len(line) > limit {
             if !current.is_empty() {
                 chunks.push(std::mem::take(&mut current));
             }
-            chunks.extend(split_by_words(line));
+            chunks.extend(split_by_words(line, limit));
             continue;
         }
         let extra = if current.is_empty() { 0 } else { 1 };
-        if !current.is_empty() && char_len(&current) + extra + char_len(line) > MAX_POST_CHARS {
+        if !current.is_empty() && char_len(&current) + extra + char_len(line) > limit {
             chunks.push(std::mem::take(&mut current));
         }
         if !current.is_empty() {
@@ -399,11 +426,11 @@ fn split_by_lines(text: &str) -> Vec<String> {
 }
 
 /// Last-resort split of a single token longer than the limit (e.g. a URL).
-fn hard_split(word: &str) -> Vec<String> {
+fn hard_split(word: &str, limit: usize) -> Vec<String> {
     let mut pieces = Vec::new();
     let mut piece = String::new();
     for c in word.chars() {
-        if char_len(&piece) == MAX_POST_CHARS {
+        if char_len(&piece) == limit {
             pieces.push(std::mem::take(&mut piece));
         }
         piece.push(c);
@@ -447,6 +474,18 @@ mod tests {
             assert!(post.contains('/'), "post missing numbering: {post:?}");
         }
         assert!(posts.last().unwrap().ends_with(&format!("{n}/{n}", n = posts.len())));
+    }
+
+    #[test]
+    fn thousand_post_thread_stays_under_hard_limit() {
+        // ≥1000 posts makes the "n/N" suffix 9+ chars; the re-pack must keep
+        // every numbered post within X's 280 hard limit
+        let content = "lorem ipsum dolor sit amet ".repeat(11_000); // ~297k chars
+        let posts = render_thread(&content);
+        assert!(posts.len() >= 1000, "expected ≥1000 posts, got {}", posts.len());
+        for post in &posts {
+            assert!(char_len(post) <= HARD_LIMIT, "post over limit: {}", char_len(post));
+        }
     }
 
     #[test]
