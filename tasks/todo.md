@@ -196,7 +196,7 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 
 ---
 
-## ACTIVE — v2.1 #5: Idea Inbox (quick capture)
+## DONE — v2.1 #5: Idea Inbox (quick capture)
 
 > Click-driven only (no global OS shortcut — no-shortcuts preference). Ideas are
 > ordinary documents with a new `DocType::Idea`. A pinned "Inbox" section in the
@@ -245,3 +245,28 @@ Implemented (awaiting live verification):
 - Verified: cargo test 42 green; pnpm check 0/0; pnpm build + cargo build clean.
 - Possible follow-up: auto-name an idea from its first line (today it's "New
   idea" until renamed — same pattern as chat auto-titling).
+
+### Redesign — v2.1.1: ideas are notes, not mini-documents (PR #6, 2026-06-10)
+
+The first cut opened ideas in the big editor and auto-titled them from the first
+line (manual rename removed). In use, capture felt too heavy (it pulled you out
+of your open doc) and created two overlapping long-form editors. Reframed ideas
+as **quick notes** — see memory `ideas-are-notes`.
+
+- **Capture/edit in a modal** (`IdeaCaptureModal.svelte`), never the big editor:
+  `+ New idea` and clicking an idea both open it; a row is created only on save,
+  so the open document never changes underneath you. Idea click → `openIdea`
+  (modal), not `selectDocument`.
+- **Convert to document** (new `update_document_type`): promotes an idea to a
+  real doc as-is, no AI; it leaves the Inbox via the type change. Sidebar gains a
+  `→ Convert` submenu alongside Expand/Delete.
+- **Manual titles restored** via `title_explicit` (migration v5),
+  explicit-wins-then-derive: typed title or pencil rename sticks; empty title
+  derives from the first line and keeps following it. Mutually exclusive states,
+  so auto-derive can't fight a rename. `update_idea_name` is the only path back
+  to derived; `rename_document` always forces explicit. Removed the `flushSave`
+  first-line auto-rename — idea saves write directly off the editor save loop.
+- **Expand polish:** spinner shows "Expanding into {target}…" + success toast.
+- Verified: cargo test 47 green; pnpm check 0/0; live-tested.
+- Open follow-up: Convert reuses the idea's (possibly `…`-truncated) Inbox name
+  as the new doc title — could prompt for a name instead.

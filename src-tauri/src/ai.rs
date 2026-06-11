@@ -155,47 +155,65 @@ pub fn delete_api_key(app: &AppHandle, provider: Provider) -> Result<()> {
 // Streaming
 // ---------------------------------------------------------------------------
 
-fn system_prompt(document_content: &str) -> String {
+/// The user's global "Voice & tone" guidance, appended to every system prompt.
+/// Empty/whitespace → no section, so prompts are unchanged when unset. Placed
+/// AFTER each prompt's mechanical rules and self-limited to style, so it can
+/// never override the output contracts (e.g. inline edit's "replacement only").
+fn voice_section(voice: Option<&str>) -> String {
+    match voice.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(v) => format!(
+            "\n\nVoice & tone — the user's own description of how their writing should \
+             sound (wording, rhythm, tone). Apply it to what you write, but it never \
+             overrides the formatting rules above:\n---\n{v}\n---"
+        ),
+        None => String::new(),
+    }
+}
+
+/// Chat system prompt. The model is a writing partner with the live document as
+/// context; revisions of the whole doc come back in a ```markdown block so the
+/// UI can apply them in one click.
+fn system_prompt(document_content: &str, voice: Option<&str>) -> String {
     format!(
-        "You are an AI writing partner embedded in Markdown, a desktop writing app for \
-         content creators who write in markdown and publish across platforms (blogs, \
-         newsletters, LinkedIn, X). The user is editing a document; its current content \
-         is below.\n\n\
-         Current document content:\n---\n{document_content}\n---\n\n\
-         Help the user review, improve, or generate content. Be concise. When you \
-         suggest a revised version of the document, provide the complete markdown in a \
-         ```markdown code block so it can be applied directly."
+        "You are the AI writing partner in Plume, a local-first desktop app for content \
+         creators who write in markdown and publish across platforms (blogs, \
+         newsletters, LinkedIn, X). The user is editing the document below — help them \
+         review, improve, or generate content. Be concise and direct. When you propose a \
+         revised version of the whole document, give the complete markdown in a \
+         ```markdown code block so it can be applied in one click.\n\n\
+         Current document content:\n---\n{document_content}\n---{voice}",
+        voice = voice_section(voice)
     )
 }
 
 /// System prompt for an inline edit: the model is editing a selected fragment
 /// of the document and must return ONLY the replacement text — no preamble, no
 /// code fences — so the result can be spliced straight back into the editor.
-fn inline_system_prompt(document_content: &str, selected_text: &str) -> String {
+fn inline_system_prompt(document_content: &str, selected_text: &str, voice: Option<&str>) -> String {
     format!(
-        "You are editing a fragment of a markdown document inside Markdown, a desktop \
-         writing app. Apply the user's instruction to the selected text and return ONLY \
-         the replacement text. Do not add any preamble, explanation, quotes, or code \
-         fences — output only the edited fragment, ready to paste in place. Match the \
-         surrounding markdown style and keep the user's voice.\n\n\
+        "You are performing an inline edit inside Plume, a desktop writing app. Apply the \
+         user's instruction to the selected text and return ONLY the replacement text — \
+         no preamble, explanation, quotes, or code fences — ready to paste in place. \
+         Match the surrounding markdown style.\n\n\
          Full document (for context):\n---\n{document_content}\n---\n\n\
-         Selected text to edit:\n---\n{selected_text}\n---"
+         Selected text to edit:\n---\n{selected_text}\n---{voice}",
+        voice = voice_section(voice)
     )
 }
 
 /// System prompt for expanding a captured idea fragment into a full draft of
 /// the given target document type. Returns ONLY the markdown body of the draft
 /// (no preamble, no code fences) so it can be written straight into a new doc.
-fn expand_system_prompt(idea: &str, target_label: &str) -> String {
+fn expand_system_prompt(idea: &str, target_label: &str, voice: Option<&str>) -> String {
     format!(
-        "You are a writing partner inside Plume, a desktop writing app for content \
-         creators. The user captured a rough idea and wants it expanded into a \
-         structured first draft for a {target_label}. Develop the idea into a complete, \
-         well-organized draft written in markdown: a clear angle, logical sections, and \
-         concrete substance — not filler. Match the conventions of a {target_label}. \
-         Return ONLY the markdown body of the draft: no preamble, no explanation, no \
-         surrounding code fences.\n\n\
-         The captured idea:\n---\n{idea}\n---"
+        "You are the writing partner in Plume, a desktop app for content creators. The \
+         user captured a rough idea and wants it expanded into a structured first draft \
+         for a {target_label}. Develop the idea into a complete, well-organized markdown \
+         draft: a clear angle, logical sections, and concrete substance — not filler. \
+         Match the conventions of a {target_label}. Return ONLY the markdown body of the \
+         draft: no preamble, no explanation, no surrounding code fences.\n\n\
+         The captured idea:\n---\n{idea}\n---{voice}",
+        voice = voice_section(voice)
     )
 }
 
@@ -204,6 +222,7 @@ fn expand_system_prompt(idea: &str, target_label: &str) -> String {
 /// chat panel ignores it). Uses the provider's default (strong) model — this is
 /// a generative job. Shares the single AiState slot (mutually exclusive with
 /// chat/inline edit).
+#[allow(clippy::too_many_arguments)]
 pub fn start_expand_stream(
     app: AppHandle,
     state: &AiState,
@@ -212,11 +231,12 @@ pub fn start_expand_stream(
     model: Option<String>,
     idea: String,
     target_label: String,
+    voice: Option<String>,
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.default_model().to_string());
-    let system = expand_system_prompt(&idea, &target_label);
+    let system = expand_system_prompt(&idea, &target_label, voice.as_deref());
     let messages = vec![ChatMessage {
         role: "user".into(),
         content: format!("Expand my idea into a {target_label} draft."),
@@ -224,6 +244,7 @@ pub fn start_expand_stream(
     run_stream(app, state, stream_id, provider, model, system, messages)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn start_stream(
     app: AppHandle,
     state: &AiState,
@@ -232,11 +253,12 @@ pub fn start_stream(
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
+    voice: Option<String>,
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.default_model().to_string());
-    let system = system_prompt(&document_content);
+    let system = system_prompt(&document_content, voice.as_deref());
     run_stream(app, state, stream_id, provider, model, system, messages)
 }
 
@@ -245,6 +267,7 @@ pub fn start_stream(
 /// stream id, so the chat panel ignores it). Defaults to the provider's faster
 /// model. Shares the single AiState slot — starting this aborts any chat stream
 /// and vice versa.
+#[allow(clippy::too_many_arguments)]
 pub fn start_inline_stream(
     app: AppHandle,
     state: &AiState,
@@ -254,11 +277,12 @@ pub fn start_inline_stream(
     instruction: String,
     selected_text: String,
     document_content: String,
+    voice: Option<String>,
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.fast_model().to_string());
-    let system = inline_system_prompt(&document_content, &selected_text);
+    let system = inline_system_prompt(&document_content, &selected_text, voice.as_deref());
     let messages = vec![ChatMessage { role: "user".into(), content: instruction }];
     run_stream(app, state, stream_id, provider, model, system, messages)
 }
@@ -532,7 +556,7 @@ mod tests {
 
     #[test]
     fn inline_prompt_includes_selection_and_replace_only_rule() {
-        let prompt = inline_system_prompt("# Doc\n\nbody text", "body text");
+        let prompt = inline_system_prompt("# Doc\n\nbody text", "body text", None);
         assert!(prompt.contains("body text"));
         assert!(prompt.contains("# Doc"));
         // the replace-only instruction is what keeps the output spliceable
@@ -542,10 +566,35 @@ mod tests {
 
     #[test]
     fn expand_prompt_includes_idea_and_target() {
-        let prompt = expand_system_prompt("a post about local-first apps", "Newsletter");
+        let prompt = expand_system_prompt("a post about local-first apps", "Newsletter", None);
         assert!(prompt.contains("a post about local-first apps"));
         assert!(prompt.contains("Newsletter"));
         // body-only so it can be written straight into a new doc
         assert!(prompt.contains("ONLY the markdown body"));
+    }
+
+    #[test]
+    fn voice_injected_into_all_surfaces_when_set() {
+        let v = Some("terse, lowercase, dry wit");
+        assert!(system_prompt("doc", v).contains("terse, lowercase, dry wit"));
+        assert!(inline_system_prompt("doc", "sel", v).contains("terse, lowercase, dry wit"));
+        assert!(expand_system_prompt("idea", "Blog Post", v).contains("terse, lowercase, dry wit"));
+    }
+
+    #[test]
+    fn voice_absent_when_unset_or_blank() {
+        // None and whitespace both yield no voice section
+        assert!(!system_prompt("doc", None).contains("Voice & tone"));
+        assert!(!system_prompt("doc", Some("   ")).contains("Voice & tone"));
+    }
+
+    #[test]
+    fn mechanical_rule_precedes_voice_in_inline() {
+        // with a voice set, the replace-only contract must still hold and come
+        // before the voice block (voice is style-only, never overrides format)
+        let prompt = inline_system_prompt("doc", "sel", Some("flowery and verbose"));
+        let rule = prompt.find("ONLY the replacement text").unwrap();
+        let voice = prompt.find("Voice & tone").unwrap();
+        assert!(rule < voice);
     }
 }

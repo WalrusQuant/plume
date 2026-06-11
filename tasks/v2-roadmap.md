@@ -17,8 +17,8 @@
 | 2 | Document snapshots / history | Low | migration v3 | — | ✅ done 2026-06-10 |
 | 3 | Multiple chats per doc + token visibility | Low-Med | migration v4 | — | ✅ done 2026-06-10 |
 | 4 | Inline AI edit (selection menu) | Medium | none | #2 strongly recommended | ✅ done 2026-06-10 (selection menu, click-driven) |
-| 5 | Idea inbox / quick capture | Medium | none (enum variant) | — | ✅ done 2026-06-10 (click-driven Inbox, no global shortcut) |
-| 6 | Voice profile | Medium | small migration | — |
+| 5 | Idea inbox / quick capture | Medium | migration v5 | — | ✅ done 2026-06-10 (click-driven Inbox; redesigned to notes-in-a-modal, PR #6) |
+| 6 | Voice profile | Medium | none | — | ✅ done 2026-06-10 (shipped as a global Voice & tone setting injected into all prompts; exemplar-picker + AI distillation deferred) |
 | 7 | Cross-document memory (search + AI recall) | Med-High | FTS5 migration | — |
 | 8 | Pipeline & publishing | High | migration(s) | — |
 | 9 | Content multiplication | High | small migration | #6, ideally #7 + #8 |
@@ -231,6 +231,15 @@ end and creates a daily-open habit even when not writing.
 ---
 
 ## 6. Voice profile
+
+> ✅ **Shipped 2026-06-10 (simplified).** Implemented as a single global **Voice &
+> tone** free-text field in Settings, injected (via a shared `voice_section`
+> helper in `ai.rs`) after the mechanical rules of all three system prompts —
+> chat, inline edit, expand. Rides the existing localStorage AI-settings blob +
+> per-request arg plumbing; no migration. Also tightened the three prompts and
+> unified the brand to "Plume". **Decision:** product owns the (non-editable)
+> system prompts; the user owns only their voice. **Deferred:** the exemplar
+> picker + AI distillation below (the voice card can later auto-fill this field).
 
 **What:** The AI writes like *the user*. A settings section where they pick
 3–10 of their own pieces as exemplars (or paste samples); the app distills a

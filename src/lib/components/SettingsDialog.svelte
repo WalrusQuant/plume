@@ -20,6 +20,7 @@
 
   let formProvider = $state<AIProvider>("anthropic");
   let formModel = $state("");
+  let formVoice = $state("");
   let keyInput = $state("");
   let keyError = $state("");
   let hasSavedKey = $state(false);
@@ -29,6 +30,7 @@
     if (open) {
       formProvider = assistant.settings.provider;
       formModel = assistant.settings.model;
+      formVoice = assistant.settings.voice;
       keyInput = "";
       keyError = "";
     }
@@ -50,7 +52,11 @@
     e.preventDefault();
     keyError = "";
     try {
-      await assistant.updateSettings({ provider: formProvider, model: formModel.trim() });
+      await assistant.updateSettings({
+        provider: formProvider,
+        model: formModel.trim(),
+        voice: formVoice.trim(),
+      });
       if (keyInput.trim()) {
         await assistant.saveKey(keyInput.trim());
       }
@@ -123,6 +129,18 @@
             <option value={model}></option>
           {/each}
         </datalist>
+
+        <label class="dialog-label" for="settings-voice">Voice &amp; tone</label>
+        <textarea
+          id="settings-voice"
+          class="dialog-textarea"
+          rows="4"
+          placeholder="Describe how the AI should write for you — tone, rhythm, words you love or avoid. Applies to chat, inline edits, and idea expansion. Leave blank for neutral."
+          bind:value={formVoice}
+        ></textarea>
+        <p class="assistant-key-note">
+          Your voice is added to every AI request so generated text sounds like you.
+        </p>
 
         <label class="dialog-label" for="settings-key">API key</label>
         <input

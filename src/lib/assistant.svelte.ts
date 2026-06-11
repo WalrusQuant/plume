@@ -13,16 +13,24 @@ export const DEFAULT_MODELS: Record<AIProvider, string> = {
 export interface AISettings {
   provider: AIProvider;
   model: string;
+  /** Global "Voice & tone" guidance injected into every AI system prompt. */
+  voice: string;
 }
 
 function loadSettings(): AISettings {
+  const defaults: AISettings = {
+    provider: "anthropic",
+    model: DEFAULT_MODELS.anthropic,
+    voice: "",
+  };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) return JSON.parse(raw);
+    // merge so blobs saved before `voice` existed still get a defined value
+    if (raw) return { ...defaults, ...JSON.parse(raw) };
   } catch {
     /* fall through to defaults */
   }
-  return { provider: "anthropic", model: DEFAULT_MODELS.anthropic };
+  return defaults;
 }
 
 /** Derive a short chat title from the first user message. */
@@ -201,6 +209,7 @@ class AssistantStore {
         this.settings.model || null,
         $state.snapshot(this.messages),
         documentContent,
+        this.settings.voice || null,
       );
     } catch (e) {
       this.messages = [...this.messages, { role: "assistant", content: `Error: ${e}` }];
