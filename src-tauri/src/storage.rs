@@ -64,6 +64,11 @@ pub struct Document {
     pub folder_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// True once the user has set the name deliberately (typed a title or
+    /// renamed). False means the name is derived (ideas: from the first line)
+    /// and may be auto-updated. The two states are mutually exclusive, so
+    /// auto-derivation can never clobber a manual title.
+    pub title_explicit: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -185,6 +190,8 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE chat_messages ADD COLUMN input_tokens INTEGER;
     ALTER TABLE chat_messages ADD COLUMN output_tokens INTEGER;
     CREATE INDEX idx_chat_messages_chat ON chat_messages(chat_id);",
+    // v5 — explicit-vs-derived title flag (ideas: manual title vs first-line)
+    "ALTER TABLE documents ADD COLUMN title_explicit INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -229,10 +236,11 @@ fn document_from_row(row: &Row) -> rusqlite::Result<Document> {
         folder_id: row.get(3)?,
         created_at: row.get(4)?,
         updated_at: row.get(5)?,
+        title_explicit: row.get(6)?,
     })
 }
 
-const DOC_COLUMNS: &str = "id, name, type, folder_id, created_at, updated_at";
+const DOC_COLUMNS: &str = "id, name, type, folder_id, created_at, updated_at, title_explicit";
 
 fn get_document(conn: &Connection, id: &str) -> Result<Document> {
     conn.query_row(
@@ -279,9 +287,52 @@ pub fn create_document(
 
 pub fn rename_document(conn: &Connection, id: &str, name: &str) -> Result<Document> {
     let name = validated_name(name)?;
+    // A rename is always a deliberate act → the name becomes explicit.
     let changed = conn.execute(
-        "UPDATE documents SET name = ?2, updated_at = ?3 WHERE id = ?1",
+        "UPDATE documents SET name = ?2, title_explicit = 1, updated_at = ?3 WHERE id = ?1",
         rusqlite::params![id, name, now()],
+    )?;
+    if changed == 0 {
+        return Err(Error::NotFound("document"));
+    }
+    get_document(conn, id)
+}
+
+/// Set an idea's name along with its explicit/derived flag. The capture modal
+/// uses this for both cases: a typed title (`explicit = true`, sticks) and an
+/// empty title (`explicit = false`, derived from the first line). Unlike
+/// `rename_document` it can return a name to the derived state.
+pub fn update_idea_name(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    explicit: bool,
+) -> Result<Document> {
+    let name = validated_name(name)?;
+    let changed = conn.execute(
+        "UPDATE documents SET name = ?2, title_explicit = ?3, updated_at = ?4 WHERE id = ?1",
+        rusqlite::params![id, name, explicit, now()],
+    )?;
+    if changed == 0 {
+        return Err(Error::NotFound("document"));
+    }
+    get_document(conn, id)
+}
+
+/// Convert a document to another type, atomically locking in a real title.
+/// Used to promote an idea into a regular document (it then leaves the Inbox,
+/// which filters purely on `type`).
+pub fn update_document_type(
+    conn: &Connection,
+    id: &str,
+    doc_type: DocType,
+    name: &str,
+    explicit: bool,
+) -> Result<Document> {
+    let name = validated_name(name)?;
+    let changed = conn.execute(
+        "UPDATE documents SET type = ?2, name = ?3, title_explicit = ?4, updated_at = ?5 WHERE id = ?1",
+        rusqlite::params![id, doc_type.as_str(), name, explicit, now()],
     )?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
@@ -681,6 +732,65 @@ mod tests {
         let conn = test_conn();
         let doc = create_document(&conn, "Untitled", None, None).unwrap();
         assert_eq!(doc.doc_type, DocType::Generic);
+    }
+
+    #[test]
+    fn title_explicit_defaults_false() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "New idea", Some(DocType::Idea), None).unwrap();
+        assert!(!doc.title_explicit);
+    }
+
+    #[test]
+    fn rename_sets_title_explicit() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "New idea", Some(DocType::Idea), None).unwrap();
+        let renamed = rename_document(&conn, &doc.id, "My Idea").unwrap();
+        assert!(renamed.title_explicit);
+    }
+
+    #[test]
+    fn update_idea_name_can_set_derived_then_explicit() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "New idea", Some(DocType::Idea), None).unwrap();
+
+        let derived = update_idea_name(&conn, &doc.id, "First line", false).unwrap();
+        assert_eq!(derived.name, "First line");
+        assert!(!derived.title_explicit);
+
+        let explicit = update_idea_name(&conn, &doc.id, "Real Title", true).unwrap();
+        assert!(explicit.title_explicit);
+
+        // and back to derived
+        let back = update_idea_name(&conn, &doc.id, "New first line", false).unwrap();
+        assert!(!back.title_explicit);
+    }
+
+    #[test]
+    fn update_document_type_converts_and_titles() {
+        let conn = test_conn();
+        let idea = create_document(&conn, "Buy milk", Some(DocType::Idea), Some("body")).unwrap();
+        let converted =
+            update_document_type(&conn, &idea.id, DocType::BlogPost, "Buy milk", true).unwrap();
+        assert_eq!(converted.doc_type, DocType::BlogPost);
+        assert_eq!(converted.name, "Buy milk");
+        assert!(converted.title_explicit);
+
+        // no longer an idea
+        let ideas: Vec<_> = list_documents(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|d| d.doc_type == DocType::Idea)
+            .collect();
+        assert!(ideas.is_empty());
+    }
+
+    #[test]
+    fn update_document_type_missing_id_fails() {
+        let conn = test_conn();
+        let err =
+            update_document_type(&conn, "nope", DocType::BlogPost, "X", true).unwrap_err();
+        assert!(matches!(err, Error::NotFound("document")));
     }
 
     #[test]

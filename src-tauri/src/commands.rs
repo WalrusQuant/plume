@@ -46,6 +46,27 @@ pub fn rename_document(db: State<Db>, id: String, name: String) -> Result<Docume
 }
 
 #[tauri::command]
+pub fn update_idea_name(
+    db: State<Db>,
+    id: String,
+    name: String,
+    explicit: bool,
+) -> Result<Document> {
+    db.with(|conn| storage::update_idea_name(conn, &id, &name, explicit))
+}
+
+#[tauri::command]
+pub fn update_document_type(
+    db: State<Db>,
+    id: String,
+    doc_type: DocType,
+    name: String,
+    explicit: bool,
+) -> Result<Document> {
+    db.with(|conn| storage::update_document_type(conn, &id, doc_type, &name, explicit))
+}
+
+#[tauri::command]
 pub fn move_document(db: State<Db>, id: String, folder_id: Option<String>) -> Result<Document> {
     db.with(|conn| storage::move_document(conn, &id, folder_id.as_deref()))
 }

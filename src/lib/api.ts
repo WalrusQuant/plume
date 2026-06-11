@@ -19,6 +19,9 @@ export interface Document {
   folderId: string | null;
   createdAt: string;
   updatedAt: string;
+  /** True once the name was set deliberately; false means it's derived (ideas:
+      from the first line) and may be auto-updated. */
+  titleExplicit: boolean;
 }
 
 export interface Folder {
@@ -74,6 +77,14 @@ export const api = {
     invoke<Document>("create_document", { name, docType, content }),
   renameDocument: (id: string, name: string) =>
     invoke<Document>("rename_document", { id, name }),
+  updateIdeaName: (id: string, name: string, explicit: boolean) =>
+    invoke<Document>("update_idea_name", { id, name, explicit }),
+  updateDocumentType: (
+    id: string,
+    docType: DocType,
+    name: string,
+    explicit: boolean,
+  ) => invoke<Document>("update_document_type", { id, docType, name, explicit }),
   moveDocument: (id: string, folderId: string | null) =>
     invoke<Document>("move_document", { id, folderId }),
   deleteDocument: (id: string) => invoke<void>("delete_document", { id }),

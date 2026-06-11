@@ -404,6 +404,12 @@ button:focus-visible {
   line-height: 1.2;
 }
 
+.sidebar-idea-expanding {
+  font-size: 11px;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
 .sidebar-item-actions {
   display: none;
   gap: 2px;
@@ -1312,6 +1318,31 @@ button:focus-visible {
 }
 
 .dialog-input::placeholder {
+  color: var(--sidebar-muted);
+}
+
+.dialog-textarea {
+  width: 100%;
+  min-height: 180px;
+  margin-top: 10px;
+  resize: vertical;
+  padding: 10px 12px;
+  background: var(--editor-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--topbar-text);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.dialog-textarea:focus {
+  border-color: var(--accent);
+}
+
+.dialog-textarea::placeholder {
   color: var(--sidebar-muted);
 }
 
