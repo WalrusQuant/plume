@@ -7,6 +7,8 @@ to everywhere you publish.
 Built for content creators who write in markdown and publish to many places:
 blogs, newsletters, LinkedIn, X.
 
+![Plume — the markdown editor with live preview, document shelf, and AI writing partner](docs/screenshot.png)
+
 ## Features
 
 - **Markdown editor** — CodeMirror 6 with syntax highlighting, formatting
@@ -25,6 +27,12 @@ blogs, newsletters, LinkedIn, X.
 - **Voice & tone** — describe how your writing should sound once in settings;
   it's injected into every AI request (chat, inline edit, idea expansion) so
   generated text sounds like you
+- **Content multiplication** — from a finished piece, generate platform-native
+  variants (blog post, newsletter, LinkedIn post, X thread) in your own voice,
+  each a linked, editable document — write once, adapt everywhere
+- **Cross-document search + @-mention** — full-text search across everything
+  you've written (SQLite FTS5), and @-mention past docs to pull them into the
+  chat as context
 - **Idea inbox** — capture a half-formed idea in a quick modal without leaving
   what you're writing, optionally let AI expand it into a draft, then convert
   it into a real document when you're ready
@@ -36,8 +44,10 @@ blogs, newsletters, LinkedIn, X.
     posts (code blocks intact, links flattened); *Article* mode is a rich HTML
     paste matching what the X Article composer keeps
   - **HTML** — clean, self-contained semantic document with dark-mode support
-  - **Word (.docx)** — real document structure: heading styles, tables,
-    lists, code blocks
+  - **Word (.docx)** — real document structure: built-in heading styles
+    (outline/TOC), Word-native numbered/bulleted lists, task-list checkboxes,
+    real hyperlinks, embedded images, footnotes, and tables with column
+    alignment + header shading
 - **Templates** — blog post, newsletter, LinkedIn post, X thread, plus
   agent-file types (Claude Code skills, CLAUDE.md, system prompts, runbooks)
 - **Local-first** — everything lives in a SQLite database on your machine.
@@ -94,7 +104,11 @@ v1 (complete): editor + AI assistant + LinkedIn/HTML/docx export.
 
 v2 (shipped): X thread + X Article export, multiple chats per document with
 token usage, version history + restore, inline AI edit, idea inbox, global
-Voice & tone.
+Voice & tone, content multiplication, cross-document search + @-mention, the
+project shelf home screen, server-side context compaction for long chats, and
+a full docx export pass.
 
-Next up: context compaction. Later: direct API publishing (Ghost, beehiiv,
-Dev.to), AI-adapted per-platform export, PDF/EPUB.
+Direction: Plume is evolving from a pure distribution tool into a markdown
+workspace for **building in public** — plan a project, keep its build log, and
+turn that real work into quality posts in your voice. Output stays copy/paste +
+export; there is no publishing pipeline.
