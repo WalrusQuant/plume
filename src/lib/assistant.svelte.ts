@@ -6,6 +6,19 @@ const SETTINGS_KEY = "markdown-ai-settings";
 /** Must match storage.rs::DEFAULT_CHAT_TITLE — signals an un-titled chat. */
 const DEFAULT_CHAT_TITLE = "New chat";
 
+// Upper bound (estimated tokens) on the chat history we send. The full thread
+// always stays in storage and the UI — this only trims what goes over the wire.
+/** OpenRouter has no server-side compaction, so this is a real cap: a long
+    thread drops its oldest turns once it crosses the budget. */
+const OPENROUTER_HISTORY_BUDGET = 120_000;
+/** Anthropic uses server-side compaction (summarizes at ~150K input), so this
+    is only a backstop set far above the trigger — it effectively never fires.
+    Because compaction keeps the input near 150K, the newest turns (incl. the
+    current compaction anchor) sit well inside this window in practice; the cap
+    is a last-resort guard against a pathological >600K thread, not a context
+    manager. */
+const ANTHROPIC_HISTORY_BUDGET = 600_000;
+
 export const DEFAULT_MODELS: Record<AIProvider, string> = {
   anthropic: "claude-opus-4-8",
   openrouter: "anthropic/claude-opus-4.8",
@@ -45,18 +58,50 @@ function deriveTitle(text: string): string {
 
 /** Build the API payload from the visible thread. Merges consecutive
     same-role messages (e.g. after a stop before the first token, or an
-    errored turn) — the Anthropic API rejects non-alternating roles. */
+    errored turn) — the Anthropic API rejects non-alternating roles. A
+    block-bearing turn (one carrying a compaction summary in `rawContent`)
+    is never merged and always keeps its `rawContent`, so the summary
+    round-trips verbatim. */
 function toApiMessages(messages: ChatMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const m of messages) {
     const last = out[out.length - 1];
-    if (last && last.role === m.role) {
+    // only merge when BOTH sides are plain text — never concat into or out of
+    // a block-bearing turn (its content is a content-block array, not a string)
+    if (last && last.role === m.role && !last.rawContent && !m.rawContent) {
       last.content += `\n\n${m.content}`;
     } else {
-      out.push({ role: m.role, content: m.content });
+      out.push({ role: m.role, content: m.content, rawContent: m.rawContent });
     }
   }
   return out;
+}
+
+/** Rough token estimate for a message body (~4 chars/token). Only used to
+    bound how much history we send — never billed, so an approximation is fine. */
+function estimateTokens(content: string): number {
+  return Math.ceil(content.length / 4);
+}
+
+/** Trim the history so a long thread can't blow up cost or overflow the context
+    window. Keeps the most recent turns within `budget` estimated tokens (the
+    just-sent user message is always kept) and never starts the payload with an
+    assistant turn — Anthropic requires the first message to be `user`, and
+    OpenRouter is happier that way too. Operates on a copy; the stored thread
+    and the UI are untouched. */
+function capHistory(messages: ChatMessage[], budget: number): ChatMessage[] {
+  if (messages.length === 0) return messages;
+  let total = estimateTokens(messages[messages.length - 1].content);
+  let start = messages.length - 1; // always include the newest turn
+  for (let i = messages.length - 2; i >= 0; i--) {
+    const t = estimateTokens(messages[i].content);
+    if (total + t > budget) break;
+    total += t;
+    start = i;
+  }
+  // dropping older turns can leave a leading assistant message — strip those
+  while (start < messages.length - 1 && messages[start].role === "assistant") start++;
+  return messages.slice(start);
 }
 
 /** Payloads of the assistant:* events emitted by ai.rs. */
@@ -79,6 +124,12 @@ interface StreamUsage {
   inputTokens: number;
   outputTokens: number;
 }
+interface StreamContent {
+  id: string;
+  /** Raw assistant content-block array (incl. a compaction block) to persist
+      and replay verbatim. Emitted only when the turn produced a compaction. */
+  content: unknown;
+}
 
 /** Chat state + Tauri event plumbing for the AI panel. Each document has one
     or more chat threads; the HTTP call and the API key live in Rust, this
@@ -95,6 +146,9 @@ class AssistantStore {
   private docId: string | null = null;
   /** Id of the in-flight stream; events with any other id are stale. */
   private activeStreamId: string | null = null;
+  /** Set by the error handler so the following `done` knows the turn failed
+      and must drop its truncated partial reply. */
+  private streamErrored = false;
   private unlisteners: UnlistenFn[] = [];
   private listening = false;
 
@@ -113,20 +167,38 @@ class AssistantStore {
       listen<StreamUsage>("assistant:usage", (e) => {
         if (e.payload.id === this.activeStreamId) this.recordUsage(e.payload);
       }),
+      listen<StreamContent>("assistant:content", (e) => {
+        // a compaction block was produced — stash the raw content-block array on
+        // the last assistant message so it persists and replays verbatim. Emitted
+        // before `done`, so the done-handler's persist() captures it.
+        if (e.payload.id === this.activeStreamId) this.recordContent(e.payload.content);
+      }),
       listen<StreamDone>("assistant:done", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
         this.activeStreamId = null;
         this.isStreaming = false;
-        // another AI action (inline edit, expand, multiply) took the single
-        // stream slot — what we have is a truncated reply, tell the user
-        if (e.payload.aborted) toast.error("Chat reply was interrupted by another AI action.");
+        const errored = this.streamErrored;
+        this.streamErrored = false;
+        // The reply did NOT complete on its own — it was either superseded by
+        // another AI action (inline edit / expand / multiply took the single
+        // stream slot → `aborted`) or it errored mid-stream. Either way the
+        // accumulated text is a truncated fragment: drop it so it is never
+        // shown, persisted, or replayed to the model as a genuine turn.
+        if (e.payload.aborted || errored) {
+          this.dropTrailingAssistant();
+          if (e.payload.aborted) {
+            toast.error("Chat reply was interrupted by another AI action.");
+          }
+        }
         void this.persist();
       }),
       listen<StreamError>("assistant:error", (e) => {
-        // a matching done event follows and finishes the stream. Surface via
-        // toast — an "Error: …" pseudo-message would be persisted and replayed
-        // to the model as a genuine assistant turn.
+        // a matching `done` event follows and finishes the stream; flag the
+        // failure so that handler drops the partial. Surface via toast — an
+        // "Error: …" pseudo-message would be persisted and replayed to the
+        // model as a genuine assistant turn.
         if (e.payload.id !== this.activeStreamId) return;
+        this.streamErrored = true;
         toast.error(`Assistant error: ${e.payload.message}`);
       }),
     ]);
@@ -218,6 +290,14 @@ class AssistantStore {
     }
   }
 
+  /** Remove a trailing partial assistant message (after an aborted/errored
+      stream) so the truncated text isn't kept or replayed to the model. */
+  private dropTrailingAssistant() {
+    if (this.messages[this.messages.length - 1]?.role === "assistant") {
+      this.messages = this.messages.slice(0, -1);
+    }
+  }
+
   private recordUsage(u: StreamUsage) {
     const last = this.messages[this.messages.length - 1];
     if (last?.role === "assistant") {
@@ -226,30 +306,63 @@ class AssistantStore {
     }
   }
 
+  private recordContent(content: unknown) {
+    // ensure an assistant message exists: a turn that produced a compaction
+    // block but no visible text would have created none (the message is created
+    // lazily on the first token), and dropping rawContent here would lose the
+    // summary and leave replay without its anchor
+    let last = this.messages[this.messages.length - 1];
+    if (last?.role !== "assistant") {
+      this.messages = [...this.messages, { role: "assistant", content: "" }];
+      last = this.messages[this.messages.length - 1];
+    }
+    last.rawContent = content;
+  }
+
+  /** History budget for the active provider — Anthropic is a high backstop
+      (server-side compaction does the real work); OpenRouter is a hard cap. */
+  private historyBudget(): number {
+    return this.settings.provider === "anthropic"
+      ? ANTHROPIC_HISTORY_BUDGET
+      : OPENROUTER_HISTORY_BUDGET;
+  }
+
   async send(userMessage: string, documentContent: string, references: DocReference[] = []) {
     if (this.isStreaming || !this.activeChatId) return;
-    // auto-title a still-default chat from its first message
     const chat = this.activeChat;
-    if (chat && chat.title === DEFAULT_CHAT_TITLE) {
-      void this.renameChat(chat.id, deriveTitle(userMessage));
-    }
     this.messages = [...this.messages, { role: "user", content: userMessage }];
     this.isStreaming = true;
+    this.streamErrored = false;
     this.activeStreamId = crypto.randomUUID();
     try {
       await api.sendAssistantMessage(
         this.activeStreamId,
         this.settings.provider,
         this.settings.model || null,
-        toApiMessages($state.snapshot(this.messages)),
+        // cap the sent history so a long thread can't blow up cost / overflow.
+        // Anthropic relies on server-side compaction (high backstop); OpenRouter
+        // has no compaction, so its cap is the real limiter.
+        toApiMessages(capHistory($state.snapshot(this.messages), this.historyBudget())),
         documentContent,
         references,
         this.settings.voice || null,
       );
+      // the request was accepted (key present, stream started) — only now
+      // auto-title a still-default chat from its first message, so a failed
+      // send doesn't rename a chat for an exchange that never happened
+      if (chat && chat.title === DEFAULT_CHAT_TITLE) {
+        void this.renameChat(chat.id, deriveTitle(userMessage));
+      }
     } catch (e) {
       toast.error(`Sending message failed: ${e}`);
       this.isStreaming = false;
       this.activeStreamId = null;
+      // roll back the optimistic user message so it isn't persisted or merged
+      // into the next send's payload
+      const last = this.messages[this.messages.length - 1];
+      if (last?.role === "user" && last.content === userMessage) {
+        this.messages = this.messages.slice(0, -1);
+      }
     }
   }
 
@@ -257,6 +370,7 @@ class AssistantStore {
     // drop the id first so events still in flight are ignored
     this.activeStreamId = null;
     this.isStreaming = false;
+    this.streamErrored = false;
     await api.stopAssistant();
     await this.persist();
   }

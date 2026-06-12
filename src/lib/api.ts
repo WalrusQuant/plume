@@ -61,6 +61,10 @@ export interface ChatMessage {
   /** Token usage, present on assistant messages once a stream completes. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Raw assistant content-block array (incl. a server-side compaction block)
+      for a turn that carried a compaction summary; replayed verbatim so the
+      summary round-trips. Present only on such assistant turns. */
+  rawContent?: unknown;
 }
 
 export interface Chat {

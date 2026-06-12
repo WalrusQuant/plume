@@ -24,6 +24,13 @@ const EVT_TOKEN: &str = "assistant:token";
 const EVT_DONE: &str = "assistant:done";
 const EVT_ERROR: &str = "assistant:error";
 const EVT_USAGE: &str = "assistant:usage";
+/// Carries the raw assistant content-block array (incl. a compaction block) so
+/// the frontend can persist and replay it verbatim. Emitted before EVT_DONE,
+/// only when a compaction block was produced.
+const EVT_CONTENT: &str = "assistant:content";
+
+/// Beta header enabling server-side context compaction.
+const COMPACT_BETA: &str = "compact-2026-01-12";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -62,6 +69,12 @@ impl Provider {
 pub struct ChatMessage {
     pub role: String, // "user" | "assistant"
     pub content: String,
+    /// Raw assistant content-block array for a turn carrying a compaction
+    /// summary; when present it (not `content`) is sent to Anthropic so the
+    /// summary round-trips verbatim. None for user turns and plain replies.
+    /// `rawContent` on the wire (the frontend sends camelCase).
+    #[serde(rename = "rawContent", default, skip_serializing_if = "Option::is_none")]
+    pub raw_content: Option<serde_json::Value>,
 }
 
 /// A document the user @-mentioned in chat, attached as background context for a
@@ -329,8 +342,10 @@ pub fn start_expand_stream(
     let messages = vec![ChatMessage {
         role: "user".into(),
         content: format!("Expand my idea into a {target_label} draft."),
+        raw_content: None,
     }];
-    run_stream(app, state, stream_id, provider, model, system, messages)
+    // one-shot generation — no caching, no compaction (no history)
+    run_stream(app, state, stream_id, provider, model, system, messages, false, false)
 }
 
 /// Adapt a finished document into a platform-native draft of `target`, streaming
@@ -356,8 +371,10 @@ pub fn start_content_multiply_stream(
     let messages = vec![ChatMessage {
         role: "user".into(),
         content: format!("Adapt my document into a {target_label}."),
+        raw_content: None,
     }];
-    run_stream(app, state, stream_id, provider, model, system, messages)
+    // one-shot generation — no caching, no compaction (no history)
+    run_stream(app, state, stream_id, provider, model, system, messages, false, false)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -376,7 +393,12 @@ pub fn start_stream(
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.default_model().to_string());
     let system = system_prompt(&document_content, &references, voice.as_deref());
-    run_stream(app, state, stream_id, provider, model, system, messages)
+    // chat: the system prefix (instructions + document) is re-sent every turn —
+    // cache it so unchanged-document follow-ups read back at ~0.1× input price.
+    // Enable server-side compaction so a long master chat stays bounded without
+    // hard-dropping context (Anthropic + supported model only).
+    let compact = provider == Provider::Anthropic && supports_compaction(&model);
+    run_stream(app, state, stream_id, provider, model, system, messages, true, compact)
 }
 
 /// Start an inline edit: apply `instruction` to `selected_text`, streaming the
@@ -400,13 +422,19 @@ pub fn start_inline_stream(
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.fast_model().to_string());
     let system = inline_system_prompt(&document_content, &selected_text, voice.as_deref());
-    let messages = vec![ChatMessage { role: "user".into(), content: instruction }];
-    run_stream(app, state, stream_id, provider, model, system, messages)
+    let messages =
+        vec![ChatMessage { role: "user".into(), content: instruction, raw_content: None }];
+    // one-shot edit — don't pay the cache-write premium on a single-use prompt
+    run_stream(app, state, stream_id, provider, model, system, messages, false, false)
 }
 
 /// Shared driver: load the key, abort any in-flight stream, then spawn the
 /// provider request as the new in-flight task. `system` is the fully-built
-/// system prompt (chat or inline); `model` is already resolved.
+/// system prompt (chat or inline); `model` is already resolved. `cache_system`
+/// requests prompt caching of the system block (chat only — see
+/// `anthropic_request_body`); `compact` enables server-side context compaction
+/// (Anthropic chat only).
+#[allow(clippy::too_many_arguments)]
 fn run_stream(
     app: AppHandle,
     state: &AiState,
@@ -415,6 +443,8 @@ fn run_stream(
     model: String,
     system: String,
     messages: Vec<ChatMessage>,
+    cache_system: bool,
+    compact: bool,
 ) -> Result<()> {
     let Some(api_key) = get_api_key(&app, provider)? else {
         return Err(Error::InvalidInput("no API key configured".into()));
@@ -432,7 +462,17 @@ fn run_stream(
     let task = tauri::async_runtime::spawn(async move {
         let result = match provider {
             Provider::Anthropic => {
-                stream_anthropic(&task_app, &task_id, &api_key, &model, messages, &system).await
+                stream_anthropic(
+                    &task_app,
+                    &task_id,
+                    &api_key,
+                    &model,
+                    messages,
+                    &system,
+                    cache_system,
+                    compact,
+                )
+                .await
             }
             Provider::Openrouter => {
                 stream_openrouter(&task_app, &task_id, &api_key, &model, messages, &system).await
@@ -584,6 +624,86 @@ fn supports_adaptive_thinking(model: &str) -> bool {
         .any(|m| model.starts_with(m))
 }
 
+/// Whether a model supports server-side context compaction (beta
+/// `compact-2026-01-12`). Kept separate from `supports_adaptive_thinking` even
+/// though the lists currently coincide — they are distinct capabilities.
+/// Verified 2026-06-11 against the claude-api skill.
+fn supports_compaction(model: &str) -> bool {
+    ["claude-fable-5", "claude-mythos-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6"]
+        .iter()
+        .any(|m| model.starts_with(m))
+}
+
+/// Render one chat message to the Anthropic wire shape. A turn that carries a
+/// compaction summary replays its stored content-block array verbatim;
+/// everything else is a plain `{role, content}` string.
+fn anthropic_message_json(m: &ChatMessage) -> serde_json::Value {
+    match &m.raw_content {
+        Some(blocks) => json!({ "role": m.role, "content": blocks.clone() }),
+        None => json!({ "role": m.role, "content": m.content }),
+    }
+}
+
+/// Mark the most-recent compaction block (newest→oldest) for caching so the
+/// summary reads back cheaply. ONLY the last one: it's the anchor the API keeps
+/// (everything before it is dropped server-side), and caching every compaction
+/// block in a long thread would blow past the 4 cache_control breakpoints/request
+/// limit (system already uses one).
+fn cache_last_compaction(messages: &mut [serde_json::Value]) {
+    for msg in messages.iter_mut().rev() {
+        if let Some(arr) = msg["content"].as_array_mut() {
+            if let Some(block) = arr
+                .iter_mut()
+                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("compaction"))
+            {
+                block["cache_control"] = json!({ "type": "ephemeral" });
+                return;
+            }
+        }
+    }
+}
+
+/// Build the Anthropic request body. `cache_system` wraps the system prompt in
+/// a cached content block (`cache_control: ephemeral`) — worth it for the chat
+/// path, where the same system prefix (instructions + document) is re-sent every
+/// turn and reads back at ~0.1× when the document is unchanged. One-shot paths
+/// (inline edit / expand / multiply) pass `false`: a single-use prompt would
+/// only pay the ~1.25× write premium with nothing to read it back. `compact`
+/// turns on server-side context compaction (chat only).
+fn anthropic_request_body(
+    model: &str,
+    messages: &[ChatMessage],
+    system: &str,
+    cache_system: bool,
+    compact: bool,
+) -> serde_json::Value {
+    let system_field = if cache_system {
+        json!([{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }])
+    } else {
+        json!(system)
+    };
+    let mut messages_json: Vec<serde_json::Value> =
+        messages.iter().map(anthropic_message_json).collect();
+    cache_last_compaction(&mut messages_json);
+    let mut body = json!({
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "system": system_field,
+        "messages": messages_json,
+        "stream": true,
+    });
+    if supports_adaptive_thinking(model) {
+        body["thinking"] = json!({"type": "adaptive"});
+    }
+    if compact {
+        // default trigger (150K input tokens); the API summarizes older history
+        // into a compaction block and continues from the summary
+        body["context_management"] = json!({ "edits": [{ "type": "compact_20260112" }] });
+    }
+    body
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn stream_anthropic(
     app: &AppHandle,
     stream_id: &str,
@@ -591,27 +711,38 @@ async fn stream_anthropic(
     model: &str,
     messages: Vec<ChatMessage>,
     system: &str,
+    cache_system: bool,
+    compact: bool,
 ) -> Result<()> {
-    let mut body = json!({
-        "model": model,
-        "max_tokens": MAX_TOKENS,
-        "system": system,
-        "messages": messages,
-        "stream": true,
-    });
-    if supports_adaptive_thinking(model) {
-        body["thinking"] = json!({"type": "adaptive"});
-    }
-    let request = reqwest::Client::new()
+    let body = anthropic_request_body(model, &messages, system, cache_system, compact);
+    let mut request = reqwest::Client::new()
         .post(ANTHROPIC_URL)
         .header("x-api-key", api_key)
         .header("anthropic-version", ANTHROPIC_VERSION)
-        .header("content-type", "application/json")
-        .json(&body);
+        .header("content-type", "application/json");
+    if compact {
+        request = request.header("anthropic-beta", COMPACT_BETA);
+    }
+    let request = request.json(&body);
+
+    // Accumulate the assistant turn so a compaction block can be round-tripped:
+    // (visible_text, compaction_summary). Mutex (not RefCell) so the streaming
+    // future stays `Send` — `extract` is held across the SSE `.await` loop.
+    let captured = Mutex::new((String::new(), Option::<String>::None));
 
     stream_sse(app, stream_id, "Anthropic", request, |event| match event["type"].as_str() {
         Some("content_block_delta") if event["delta"]["type"] == "text_delta" => {
-            Ok(event["delta"]["text"].as_str().map_or(Chunk::None, |t| Chunk::Token(t.into())))
+            let text = event["delta"]["text"].as_str().unwrap_or_default();
+            captured.lock().expect("capture mutex poisoned").0.push_str(text);
+            Ok(if text.is_empty() { Chunk::None } else { Chunk::Token(text.into()) })
+        }
+        // the compaction summary arrives as a single complete delta; capture it
+        // but never surface it as visible reply text
+        Some("content_block_delta") if event["delta"]["type"] == "compaction_delta" => {
+            if let Some(summary) = event["delta"]["content"].as_str() {
+                captured.lock().expect("capture mutex poisoned").1 = Some(summary.to_string());
+            }
+            Ok(Chunk::None)
         }
         // input_tokens arrive in message_start; output_tokens accumulate in message_delta
         Some("message_start") => Ok(anthropic_usage(&event["message"]["usage"])),
@@ -622,7 +753,20 @@ async fn stream_anthropic(
         }
         _ => Ok(Chunk::None),
     })
-    .await
+    .await?;
+
+    // Only on success: if a compaction block was produced, emit the full
+    // content-block array so the frontend can persist it and replay it verbatim.
+    // (Aborted/errored turns never reach here, so no partial blocks persist.)
+    let (text, compaction) = captured.into_inner().expect("capture mutex poisoned");
+    if let Some(summary) = compaction {
+        let content = json!([
+            { "type": "compaction", "content": summary },
+            { "type": "text", "text": text },
+        ]);
+        let _ = app.emit(EVT_CONTENT, json!({ "id": stream_id, "content": content }));
+    }
+    Ok(())
 }
 
 /// Pull a usage chunk from an Anthropic `usage` object. The reported input is
@@ -696,6 +840,97 @@ mod tests {
         assert!(!supports_adaptive_thinking(Provider::Anthropic.fast_model()));
         assert!(!supports_adaptive_thinking("claude-haiku-4-5-20251001"));
         assert!(!supports_adaptive_thinking("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn anthropic_caches_system_only_when_requested() {
+        let msgs =
+            vec![ChatMessage { role: "user".into(), content: "hi".into(), raw_content: None }];
+
+        // chat path: the system prompt is wrapped in a cached content block
+        let cached = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false);
+        assert!(cached["system"].is_array(), "cached system must be a content-block array");
+        assert_eq!(cached["system"][0]["text"], "SYS");
+        assert_eq!(cached["system"][0]["cache_control"]["type"], "ephemeral");
+
+        // one-shot paths: plain string system, no cache-write premium
+        let plain = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", false, false);
+        assert!(plain["system"].is_string());
+        assert_eq!(plain["system"], "SYS");
+        assert!(plain["system"][0]["cache_control"].is_null());
+
+        // caching is orthogonal to the existing model-gated thinking field
+        assert_eq!(cached["thinking"]["type"], "adaptive");
+        let haiku = anthropic_request_body("claude-haiku-4-5", &msgs, "SYS", false, false);
+        assert!(haiku.get("thinking").is_none());
+    }
+
+    #[test]
+    fn supports_compaction_gates_by_model() {
+        assert!(supports_compaction("claude-opus-4-8"));
+        assert!(supports_compaction("claude-sonnet-4-6"));
+        assert!(supports_compaction("claude-fable-5"));
+        assert!(!supports_compaction("claude-haiku-4-5"));
+        assert!(!supports_compaction("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn anthropic_compaction_param_and_block_replay() {
+        // context_management only present when compaction is requested
+        let plain_msgs =
+            vec![ChatMessage { role: "user".into(), content: "hi".into(), raw_content: None }];
+        let off = anthropic_request_body("claude-opus-4-8", &plain_msgs, "SYS", true, false);
+        assert!(off.get("context_management").is_none());
+        let on = anthropic_request_body("claude-opus-4-8", &plain_msgs, "SYS", true, true);
+        assert_eq!(on["context_management"]["edits"][0]["type"], "compact_20260112");
+        // a plain message stays a string
+        assert_eq!(on["messages"][0]["content"], "hi");
+
+        // a turn with raw_content replays the block array, and the compaction
+        // block gets a cache_control breakpoint injected
+        let blocks = json!([
+            { "type": "compaction", "content": "summary" },
+            { "type": "text", "text": "reply" },
+        ]);
+        let with_blocks = vec![ChatMessage {
+            role: "assistant".into(),
+            content: "reply".into(),
+            raw_content: Some(blocks),
+        }];
+        let body = anthropic_request_body("claude-opus-4-8", &with_blocks, "SYS", true, true);
+        let content = &body["messages"][0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "compaction");
+        assert_eq!(content[0]["content"], "summary");
+        assert_eq!(content[0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(content[1]["text"], "reply");
+    }
+
+    #[test]
+    fn only_the_last_compaction_block_is_cached() {
+        // a long thread with two compaction turns must not stack cache_control
+        // breakpoints (system + N compactions would blow past the 4/request cap)
+        let turn = |summary: &str| ChatMessage {
+            role: "assistant".into(),
+            content: "r".into(),
+            raw_content: Some(json!([
+                { "type": "compaction", "content": summary },
+                { "type": "text", "text": "r" },
+            ])),
+        };
+        let msgs = vec![
+            turn("older"),
+            ChatMessage { role: "user".into(), content: "more".into(), raw_content: None },
+            turn("newer"),
+        ];
+        let body = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, true);
+        // older compaction: NOT cached
+        assert!(body["messages"][0]["content"][0]["cache_control"].is_null());
+        // newest compaction: cached
+        assert_eq!(body["messages"][2]["content"][0]["cache_control"]["type"], "ephemeral");
+        // exactly one compaction breakpoint + the system breakpoint = 2 (≤ 4)
+        let body_str = serde_json::to_string(&body).unwrap();
+        assert_eq!(body_str.matches("cache_control").count(), 2);
     }
 
     #[test]

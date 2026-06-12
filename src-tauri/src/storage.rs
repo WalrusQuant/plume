@@ -239,6 +239,11 @@ const MIGRATIONS: &[&str] = &[
         WHERE f2.name < folders.name COLLATE NOCASE
            OR (f2.name = folders.name COLLATE NOCASE AND f2.rowid < folders.rowid)
      );",
+    // v9 — raw assistant content blocks (JSON array) for an assistant turn that
+    // carries a server-side compaction summary, so it round-trips verbatim on
+    // replay (the Anthropic API drops everything before the compaction block).
+    // NULL for every existing row and for plain text/user turns.
+    "ALTER TABLE chat_messages ADD COLUMN raw_content TEXT;",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -550,6 +555,18 @@ pub struct StoredChatMessage {
     pub input_tokens: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<i64>,
+    /// Raw assistant content-block array (JSON) when this turn carries a
+    /// compaction summary; replayed verbatim so the summary round-trips. None
+    /// for user turns, plain text replies, and legacy rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_content: Option<serde_json::Value>,
+}
+
+/// Parse the `raw_content` TEXT column. Malformed JSON degrades to None rather
+/// than failing the whole read — a turn that can't replay its blocks just falls
+/// back to plain text (compaction state forfeited, no crash).
+fn parse_raw_content(stored: Option<String>) -> Option<serde_json::Value> {
+    stored.and_then(|s| serde_json::from_str(&s).ok())
 }
 
 fn chat_from_row(row: &Row) -> rusqlite::Result<Chat> {
@@ -640,7 +657,7 @@ pub fn delete_chat(conn: &Connection, chat_id: &str) -> Result<()> {
 
 pub fn get_chat_messages(conn: &Connection, chat_id: &str) -> Result<Vec<StoredChatMessage>> {
     let mut stmt = conn.prepare(
-        "SELECT role, content, input_tokens, output_tokens FROM chat_messages
+        "SELECT role, content, input_tokens, output_tokens, raw_content FROM chat_messages
          WHERE chat_id = ?1 ORDER BY id",
     )?;
     let messages = stmt
@@ -650,6 +667,7 @@ pub fn get_chat_messages(conn: &Connection, chat_id: &str) -> Result<Vec<StoredC
                 content: row.get(1)?,
                 input_tokens: row.get(2)?,
                 output_tokens: row.get(3)?,
+                raw_content: parse_raw_content(row.get(4)?),
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -677,8 +695,8 @@ pub fn save_chat_messages(
     // Existing rows (with timestamps), in thread order.
     let existing: Vec<(StoredChatMessage, String)> = {
         let mut stmt = conn.prepare(
-            "SELECT role, content, input_tokens, output_tokens, created_at FROM chat_messages
-             WHERE chat_id = ?1 ORDER BY id",
+            "SELECT role, content, input_tokens, output_tokens, raw_content, created_at
+             FROM chat_messages WHERE chat_id = ?1 ORDER BY id",
         )?;
         let rows = stmt
             .query_map([chat_id], |row| {
@@ -688,19 +706,24 @@ pub fn save_chat_messages(
                         content: row.get(1)?,
                         input_tokens: row.get(2)?,
                         output_tokens: row.get(3)?,
+                        raw_content: parse_raw_content(row.get(4)?),
                     },
-                    row.get(4)?,
+                    row.get(5)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         rows
     };
 
+    // raw_content is part of identity: a turn that *gains* a compaction block
+    // (same role+content, new raw_content) must NOT be short-circuited as
+    // unchanged, or the blocks would never persist (silent data loss).
     let identical = |a: &StoredChatMessage, b: &StoredChatMessage| {
         a.role == b.role
             && a.content == b.content
             && a.input_tokens == b.input_tokens
             && a.output_tokens == b.output_tokens
+            && a.raw_content == b.raw_content
     };
     if existing.len() == messages.len()
         && existing.iter().zip(messages).all(|((e, _), m)| identical(e, m))
@@ -714,16 +737,22 @@ pub fn save_chat_messages(
     {
         let mut stmt = tx.prepare(
             "INSERT INTO chat_messages
-                (document_id, chat_id, role, content, input_tokens, output_tokens, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                (document_id, chat_id, role, content, input_tokens, output_tokens,
+                 raw_content, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         for (i, msg) in messages.iter().enumerate() {
-            // same message at the same position (token updates don't count as
-            // a different message) → keep its original timestamp
+            // same message at the same position (token/raw_content updates don't
+            // count as a different message) → keep its original timestamp
             let created_at = existing
                 .get(i)
                 .filter(|(e, _)| e.role == msg.role && e.content == msg.content)
                 .map_or(ts.as_str(), |(_, t)| t.as_str());
+            // serialize blocks to TEXT; None → SQL NULL
+            let raw_content = msg
+                .raw_content
+                .as_ref()
+                .map(|v| serde_json::to_string(v).expect("serialize raw_content"));
             stmt.execute(rusqlite::params![
                 document_id,
                 chat_id,
@@ -731,6 +760,7 @@ pub fn save_chat_messages(
                 msg.content,
                 msg.input_tokens,
                 msg.output_tokens,
+                raw_content,
                 created_at
             ])?;
         }
@@ -1203,6 +1233,7 @@ mod tests {
             content: content.into(),
             input_tokens: None,
             output_tokens: None,
+            raw_content: None,
         }
     }
 
@@ -1220,6 +1251,7 @@ mod tests {
                 content: "hello".into(),
                 input_tokens: Some(120),
                 output_tokens: Some(8),
+                raw_content: None,
             },
         ];
         save_chat_messages(&mut conn, &chat.id, &thread).unwrap();
@@ -1288,6 +1320,95 @@ mod tests {
             .query_row("SELECT updated_at FROM chats WHERE id = ?1", [&chat.id], |r| r.get(0))
             .unwrap();
         assert_ne!(updated, updated_append);
+    }
+
+    #[test]
+    fn raw_content_roundtrips_and_persists_when_gained() {
+        let mut conn = test_conn();
+        let doc = create_document(&conn, "Draft", None, None).unwrap();
+        let chat = create_chat(&conn, &doc.id, Some("A")).unwrap();
+
+        // a plain thread, then the assistant turn later gains a compaction block
+        let plain = vec![msg("user", "hi"), msg("assistant", "hello")];
+        save_chat_messages(&mut conn, &chat.id, &plain).unwrap();
+        let created: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT created_at FROM chat_messages WHERE chat_id = ?1 ORDER BY id")
+                .unwrap();
+            stmt.query_map([&chat.id], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
+        };
+        std::thread::sleep(std::time::Duration::from_millis(5));
+
+        let blocks = serde_json::json!([
+            { "type": "compaction", "content": "summary so far" },
+            { "type": "text", "text": "hello" },
+        ]);
+        let mut gained = plain.clone();
+        gained[1].raw_content = Some(blocks.clone());
+
+        // same role+content but new raw_content → must NOT short-circuit
+        save_chat_messages(&mut conn, &chat.id, &gained).unwrap();
+        let loaded = get_chat_messages(&conn, &chat.id).unwrap();
+        assert_eq!(loaded[1].raw_content, Some(blocks));
+        assert!(loaded[0].raw_content.is_none());
+
+        // created_at preserved (raw_content change isn't a new message)
+        let created_after: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT created_at FROM chat_messages WHERE chat_id = ?1 ORDER BY id")
+                .unwrap();
+            stmt.query_map([&chat.id], |r| r.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .unwrap()
+        };
+        assert_eq!(created, created_after);
+
+        // re-saving the now-identical thread (incl. raw_content) is a no-op
+        let updated: String = conn
+            .query_row("SELECT updated_at FROM chats WHERE id = ?1", [&chat.id], |r| r.get(0))
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        save_chat_messages(&mut conn, &chat.id, &gained).unwrap();
+        let updated_after: String = conn
+            .query_row("SELECT updated_at FROM chats WHERE id = ?1", [&chat.id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(updated, updated_after);
+    }
+
+    #[test]
+    fn v9_adds_nullable_raw_content() {
+        let conn = Connection::open_in_memory().unwrap();
+        // apply migrations up to (but not including) v9
+        for (i, m) in MIGRATIONS.iter().take(MIGRATIONS.len() - 1).enumerate() {
+            conn.execute_batch(&format!("BEGIN;\n{}\nPRAGMA user_version = {};\nCOMMIT;", m, i + 1))
+                .unwrap();
+        }
+        // a pre-v9 chat message row (document_id NOT NULL since v2)
+        conn.execute(
+            "INSERT INTO documents (id, name, type, folder_id, content, created_at, updated_at, title_explicit, sort_order)
+             VALUES ('d', 'D', 'generic', NULL, '', '2026-01', '2026-01', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO chat_messages (document_id, role, content, created_at)
+             VALUES ('d', 'user', 'hi', '2026-01')",
+            [],
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version as usize, MIGRATIONS.len());
+        // existing row backfills to NULL raw_content
+        let raw: Option<String> = conn
+            .query_row("SELECT raw_content FROM chat_messages", [], |r| r.get(0))
+            .unwrap();
+        assert!(raw.is_none());
     }
 
     #[test]
