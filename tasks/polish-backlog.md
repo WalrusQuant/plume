@@ -185,4 +185,13 @@ hyperlinks. Mixed task/non-task lists render every item as a checkbox.
 ## Inbox — add small polish items here
 <!-- Drop quick notes as you think of them; triage into the plan above. -->
 
--
+- **Semantic "related notes" search (local embeddings) — spike PASSED, build
+  PAUSED 2026-06-11.** Chosen as the one real gap for the "AI writing studio"
+  positioning. `fastembed = "4"` (bge-small, 384-dim) compiles clean on arm64 +
+  cosine cleanly separates meaning (0.77 related vs 0.34 unrelated). Uncommitted
+  in tree: dep + `src-tauri/src/embeddings.rs` (spike test only — `#[ignore]` it
+  when the real build lands) + `mod embeddings;`. Planned phases: engine →
+  storage (migration **v10** `embeddings` table) → background indexing off the
+  save debounce → "Related" right-pane tab. Open: first-run ~90MB model fetch
+  (lazy vs eager vs bundle-into-resources). Full detail in the
+  `semantic-search-spike` memory.
