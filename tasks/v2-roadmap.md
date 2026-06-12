@@ -1,5 +1,13 @@
 # v2 Roadmap — from markdown editor to content operation
 
+> ⚠️ **SUPERSEDED FRAMING (2026-06-10).** The distribution-first / "publish
+> everywhere via API" north star below was **superseded by the pivot** in
+> `tasks/product-direction.md` (build-in-public writing workspace; publishing
+> pipeline **cut**). This file is kept only as an accurate **record of what
+> shipped (#1–#9)** — read `product-direction.md` for the current direction and
+> `polish-backlog.md` for the remaining work. #8 publishing and #7 Stage B are
+> effectively cut, not "v2.5."
+
 > Status (updated 2026-06-10): **#1–6, #9, and #7 Stage A all shipped — the v2
 > feature set is complete**, pending the polish backlog (compaction, assistant
 > hardening, docx round 2). **v2.5:** #8 publishing + #7 Stage B — the

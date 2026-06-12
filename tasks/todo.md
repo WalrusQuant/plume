@@ -117,13 +117,23 @@ One comrak parse → AST → each target is one `Renderer` impl. Targets registe
 ### AI chat backlog (user request, 2026-06-09 — revisit after M5)
 - [x] **Multiple chats per document** — shipped 2026-06-10 (v2 roadmap #3). Migration v4 `chats` table + `chat_messages.chat_id`; lazy backfill of pre-v4 threads on first access; chat switcher dropdown + new/delete in the assistant panel; auto-title from the first user message.
 - [x] **Token + context visibility** — shipped 2026-06-10. `assistant:usage` event (Anthropic `message_start`/`message_delta` usage; OpenRouter final `usage` chunk via `stream_options.include_usage`); per-message in/out token counts persisted on `chat_messages`; running context size in the panel header.
-- [ ] **Context management / compaction** — long threads will blow up cost and context; summarize or truncate older turns (Anthropic has server-side compaction, beta `compact-2026-01-12`; OpenRouter path needs client-side strategy).
-- [ ] General hardening pass on the assistant — user expects to do "a lot" here; treat the chat as a core surface, not a bolt-on.
+- [x] **Context management / compaction** — shipped 2026-06-11. Anthropic
+      server-side compaction (beta `compact-2026-01-12`, migration v9
+      `raw_content`); provider-aware `capHistory` cap for OpenRouter. See
+      `tasks/polish-backlog.md` Phase B + memory `compaction-needs-content-blocks`.
+- [x] General hardening pass on the assistant — shipped 2026-06-11 (polish-backlog
+      Phase A): aborted/errored streams no longer persisted/replayed, optimistic
+      user-message rollback, gated auto-title.
 
 ### Export backlog (2026-06-09)
 - [x] **X thread + X Article (rich clipboard)** — shipped 2026-06-10 (v2 roadmap #1). `export/x.rs`: thread segmenter (≤280-char numbered posts, code blocks intact, links flattened) + plain renderer; `x-article` uses an HTML-flavored clipboard write (`navigator.clipboard.write` with text/html + text/plain) reusing the preview HTML. New `ExportOutput::ClipboardHtml` variant; `render_x_thread_preview` command + an "X thread" preview pill. 7 unit tests.
-- [ ] Docx polish round 2 pending user feedback (fonts/spacing/tables shipped 2026-06-09).
-- [ ] **v2 (later):** publish-to-API targets (Ghost/beehiiv/Dev.to), AI-adapted export, optional cloud sync/backup, PDF/EPUB.
+- [x] Docx polish round 2 — shipped 2026-06-11 (polish-backlog Phase C): images,
+      hyperlinks, Word-native numbering, task checkboxes, footnotes, table
+      alignment/borders/shading, built-in Heading styles, code shading.
+- [~] **Publish-to-API targets / AI-adapted export / PDF/EPUB** — direct
+      publishing is **cut** per the 2026-06-10 pivot (`tasks/product-direction.md`):
+      no publishing pipeline; output stays copy/paste + export. Cloud sync is
+      deferred/demand-gated (`tasks/monetization.md`).
 
 ## v1 scope line (ship this, defer the rest)
 **In:** editor + AI assist + local SQLite + 3 export targets — **LinkedIn (clipboard), clean HTML (file), .docx (file, via docx-rs)**.
@@ -281,76 +291,6 @@ commands; `create_document` lands at MIN−1, `create_folder` at MAX+1,
 switched to `max(doc updatedAt)`; optimistic `+page.svelte` handlers with
 rollback; HTML5 DnD state machine in `Sidebar.svelte` (reorder-only, per-section
 via kind+section-gated `preventDefault`); accent-line drop indicators in
-`app.css`. 7 new storage tests, all 73 green; `pnpm check` 0/0. Plan preserved
-below for reference.
-
----
-
-## TODO — polish: sidebar drag-and-drop reordering (planned 2026-06-11, not started)
-
-Docs/folders can't be manually ordered — the sidebar follows `updated_at DESC`
-(folders alphabetical), so the order reshuffles on every edit.
-
-**Decisions (confirmed with user):** drag-and-drop (HTML5, no lib, no keyboard
-shortcuts); reorderable = docs within each folder + unfiled + Inbox ideas +
-the folders themselves; drag is reorder-only within its own section
-(cross-folder moves stay on MoveToFolderMenu); new docs/ideas keep landing on
-top of their section, new folders at the bottom.
-
-**Read-path strategy:** `list_documents` stays recency-ordered (shelf Recent +
-project freshness depend on it); `buildSidebarTree` sorts each section by the
-new `sortOrder`, so sidebar and shelf project lists share the manual order.
-`list_folders` → `ORDER BY sort_order, name COLLATE NOCASE`. Reordering never
-touches `updated_at`.
-
-- [ ] **Migration v8**: `sort_order INTEGER NOT NULL DEFAULT 0` on documents
-      + folders, backfilled by correlated `COUNT(*)` rank (docs by
-      `updated_at DESC`, folders by `name COLLATE NOCASE`) with a `rowid`
-      tiebreak so equal timestamps don't duplicate ranks. Upgrade preserves
-      the existing visible order exactly.
-- [ ] **Structs/columns**: `sort_order: i64` on `Document` + `Folder`; extend
-      `DOC_COLUMNS`/`FOLDER_COLUMNS` + row mappers; `list_folders` ordering.
-- [ ] **Write paths**: `create_document` inserts at global `MIN(sort_order)-1`
-      (top of section — global min is safe, comparisons only happen within a
-      section); `create_folder` at `MAX+1`; `move_document` also resets to
-      min-1 so a moved doc lands at the top of its destination (keeps bumping
-      `updated_at` — a move is deliberate).
-- [ ] **`reorder_documents(ids)` / `reorder_folders(ids)`** storage fns: in a
-      `conn.unchecked_transaction()`, `sort_order = index` per id; unknown ids
-      ignored (0-row UPDATE — a benign race must not fail the drop); does NOT
-      touch `updated_at`. + commands.rs wrappers + lib.rs registration.
-- [ ] **api.ts**: `sortOrder: number` on Document/Folder; `reorderDocuments` /
-      `reorderFolders` wrappers.
-- [ ] **buildSidebarTree.ts**: sort folder docs / unfiled / ideas by
-      `sortOrder` asc (stable sort → backfill ties fall back to recency).
-- [ ] **HomeShelf.svelte**: `freshness()` must become max(`updatedAt`) over a
-      folder's docs — `documents[0]` is no longer the newest once tree order
-      is manual. `recent` untouched (reads the recency-ordered prop).
-- [ ] **+page.svelte**: optimistic `reorderDocuments`/`reorderFolders`
-      handlers (map new sortOrders onto state, rollback + rethrow on API
-      failure so `run()` toasts); wire `onReorderDocuments`/`onReorderFolders`
-      into `<Sidebar>`.
-- [ ] **Sidebar.svelte DnD**: `dragSource {kind: doc|folder, id, section}` +
-      `dropTarget {id, edge: before|after}` state (section = folder id |
-      "unfiled" | "inbox" | "folders"; ideas are kind "doc"). Gotchas baked
-      into the design: `dataTransfer.setData` required or WebKit won't start
-      the drag; only `preventDefault` in `dragover` when kind+section match
-      (foreign sections get the no-drop cursor — cross-folder impossible by
-      construction, and no catch-all dragover on containers); clear drag state
-      in `ondrop` (re-render can recycle the node before `dragend`); refuse
-      dragstart while a row's rename input is open; `ideaItem`'s popover menus
-      are siblings of the row div — handlers go on the row div only. Extend
-      `docItem` snippet to take its section key.
-- [ ] **CSS**: `--dragging` opacity 0.4; drop indicator = absolute 2px
-      `var(--accent)` line via `::after` (top/bottom -1.5px,
-      `pointer-events: none`); add `position: relative` to
-      `.sidebar-folder-header` (`.sidebar-item` already has it).
-- [ ] **Tests**: reorder assigns positions / ignores unknown ids / doesn't
-      touch `updated_at`; create lands at top; folders use manual order + new
-      folder appends; move lands at top of destination; v8 backfill ranks
-      pre-existing rows (apply `MIGRATIONS[..7]`, insert raw, `migrate`,
-      assert). `migrate_is_idempotent` covers v8 automatically.
-- [ ] **Verify**: cargo test green; `pnpm check` 0/0; user eyeballs in
-      `pnpm tauri dev` — upgrade keeps old order; drags persist across
-      restart; cross-section drag shows no-drop; reorder changes neither row
-      dates, shelf Recent, nor freshness; renaming can't start a drag.
+`app.css`. 7 new storage tests, all 73 green; `pnpm check` 0/0. (Full
+implementation plan removed in the 2026-06-11 tasks/ cleanup — it lives in git
+history + the shipped code.)
