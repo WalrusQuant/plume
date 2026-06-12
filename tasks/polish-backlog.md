@@ -142,19 +142,43 @@ independent feature polish** (docx). Each phase is shippable on its own.
       `AssistantPanel` (input+output of the last turn) already surfaces growth;
       left in place.
 
-### Phase C — Docx export round 2 (independent feature polish)
-- [ ] Real images — add `NodeValue::Image` arm, embed via docx-rs `Pic`.
-- [ ] Real hyperlinks — replace the ` (url)` hack with a `Hyperlink` run;
-      special-case autolinks.
-- [ ] Task-list checkboxes (`☐`/`☑`) and footnotes (real Word footnotes or
-      collected endnotes).
-- [ ] Table column alignment + explicit borders/width/header shading.
-- [ ] Word-native list numbering (drop the literal text markers + faked indent).
-- [ ] Map headings to built-in Heading styles (outline/TOC).
-- [ ] Code/inline-code shading, real horizontal rule, full `RunFonts`
-      (`hAnsi`/`cs`/`east_asia`) for non-Latin.
-- [ ] (Optional) Make fonts/sizes/spacing configurable instead of hardcoded.
-- [ ] Add export unit tests for the new element handling.
+### Phase C — Docx export round 2 (independent feature polish) ✅ DONE 2026-06-11
+Full rewrite of `export/docx.rs` (all in the renderer; `preview::options()`
+untouched). Added direct deps `image` + `base64` (already in the lock via
+docx-rs) and a `zip` dev-dep for unzip-based assertions. 12 docx tests inflate
+the produced .docx and assert the OOXML markers; 90 cargo tests + clippy
+`-D warnings` green.
+- [x] Real images — `NodeValue::Image` arm embeds data-URI + absolute/`file://`
+      local images via `Pic::new` (validated through `image::load_from_memory`,
+      which also guards Pic's internal panic), scaled to ≤600px. **Remote
+      `http(s)` images fall back to a real hyperlink** (alt text) — a sync export
+      must not block on the network; remote fetch deferred (see below).
+- [x] Real hyperlinks — `Hyperlink::new(url, External)` + blue/underline runs via
+      `Paragraph::add_hyperlink`; the ` (url)` literal is gone. URL lands in
+      `document.xml.rels`.
+- [x] Task-list checkboxes (`☐`/`☑`, detected via `NodeValue::TaskItem`, not
+      numbered) and **real Word footnotes** (`Run::add_footnote_reference`;
+      definitions collected up front and skipped as body text).
+- [x] Table column alignment (`NodeTable.alignments` → `Paragraph::align`),
+      default single borders, fixed content width, and header-row shading
+      (`D9D9D9`).
+- [x] Word-native list numbering — one `AbstractNumbering`/`Numbering` per list
+      node (indent encodes depth; ordered lists restart at their `start`); literal
+      `"•  "`/`"N.  "` markers + faked indent dropped.
+- [x] Built-in Heading1–6 styles (`Docx::add_style`, `name "heading N"` +
+      `outlineLvl`) → outline/TOC; headings use `.style("HeadingN")`.
+- [x] Code block → shaded borderless single-cell table; inline code → mono font +
+      `F2F2F2` run shading; thematic break → bottom-bordered single-cell table
+      (real rule); `RunFonts` now sets `ascii`/`hi_ansi`/`cs` for body + mono.
+- [~] (Optional, deferred) Configurable fonts/sizes/spacing — left as constants;
+      no requirement for a single-user local app.
+- [x] 12 unzip-based export unit tests (headings, numbering, start value, task
+      checkboxes, hyperlinks, footnotes, table alignment+shading, code shading,
+      data-URI embed, remote-image fallback, inline-code mono).
+
+**Deferred follow-up:** fetch remote `http(s)` images and embed them (needs async
++ timeout/error handling so a dead URL can't hang export); currently they become
+hyperlinks. Mixed task/non-task lists render every item as a checkbox.
 
 ---
 

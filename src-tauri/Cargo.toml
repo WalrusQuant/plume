@@ -33,4 +33,9 @@ tauri-plugin-dialog = "2.7.1"
 futures-util = { version = "0.3.32", default-features = false, features = ["std"] }
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 docx-rs = "0.4.20"
+image = "0.25"
+base64 = "0.22"
+
+[dev-dependencies]
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
