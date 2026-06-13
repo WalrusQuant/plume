@@ -4,6 +4,7 @@ mod error;
 mod export;
 mod preview;
 mod storage;
+mod websearch;
 
 use std::sync::Mutex;
 
@@ -61,6 +62,9 @@ pub fn run() {
             commands::set_api_key,
             commands::has_api_key,
             commands::delete_api_key,
+            commands::set_tavily_key,
+            commands::has_tavily_key,
+            commands::delete_tavily_key,
             commands::send_assistant_message,
             commands::send_inline_edit,
             commands::send_idea_expand,

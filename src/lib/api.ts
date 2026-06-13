@@ -168,6 +168,13 @@ export const api = {
     invoke<void>("set_api_key", { provider, key }),
   hasApiKey: (provider: AIProvider) => invoke<boolean>("has_api_key", { provider }),
   deleteApiKey: (provider: AIProvider) => invoke<void>("delete_api_key", { provider }),
+
+  /** Tavily web-search key — BYOK, stored like the provider keys (keychain in
+      release, dev-keys file in debug). Not tied to a provider. */
+  setTavilyKey: (key: string) => invoke<void>("set_tavily_key", { key }),
+  hasTavilyKey: () => invoke<boolean>("has_tavily_key"),
+  deleteTavilyKey: () => invoke<void>("delete_tavily_key"),
+
   sendAssistantMessage: (
     streamId: string,
     provider: AIProvider,
@@ -175,6 +182,7 @@ export const api = {
     messages: ChatMessage[],
     documentContent: string,
     references: DocReference[],
+    webSearch: boolean,
     voice: string | null,
   ) =>
     invoke<void>("send_assistant_message", {
@@ -184,6 +192,7 @@ export const api = {
       messages,
       documentContent,
       references,
+      webSearch,
       voice,
     }),
   sendInlineEdit: (

@@ -288,6 +288,21 @@ pub fn delete_api_key(app: AppHandle, provider: Provider) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn set_tavily_key(app: AppHandle, key: String) -> Result<()> {
+    ai::set_tavily_key(&app, &key)
+}
+
+#[tauri::command]
+pub fn has_tavily_key(app: AppHandle) -> Result<bool> {
+    Ok(ai::get_tavily_key(&app)?.is_some())
+}
+
+#[tauri::command]
+pub fn delete_tavily_key(app: AppHandle) -> Result<()> {
+    ai::delete_tavily_key(&app)
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn send_assistant_message(
     app: AppHandle,
@@ -298,6 +313,7 @@ pub fn send_assistant_message(
     messages: Vec<ChatMessage>,
     document_content: String,
     references: Vec<DocReference>,
+    web_search: bool,
     voice: Option<String>,
 ) -> Result<()> {
     ai::start_stream(
@@ -309,6 +325,7 @@ pub fn send_assistant_message(
         messages,
         document_content,
         references,
+        web_search,
         voice,
     )
 }

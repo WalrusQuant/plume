@@ -29,6 +29,8 @@ export interface AISettings {
   model: string;
   /** Global "Voice & tone" guidance injected into every AI system prompt. */
   voice: string;
+  /** When on, chat may call the Tavily web_search tool (requires a Tavily key). */
+  webSearch: boolean;
 }
 
 function loadSettings(): AISettings {
@@ -36,6 +38,7 @@ function loadSettings(): AISettings {
     provider: "anthropic",
     model: DEFAULT_MODELS.anthropic,
     voice: "",
+    webSearch: false,
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -130,6 +133,12 @@ interface StreamContent {
       and replay verbatim. Emitted only when the turn produced a compaction. */
   content: unknown;
 }
+interface StreamStatus {
+  id: string;
+  /** Transient activity line (e.g. "Searching the web…") shown between tokens
+      while a tool call runs; cleared on the next token / done / stop. */
+  message: string;
+}
 
 /** Chat state + Tauri event plumbing for the AI panel. Each document has one
     or more chat threads; the HTTP call and the API key live in Rust, this
@@ -141,6 +150,10 @@ class AssistantStore {
   activeChatId = $state<string | null>(null);
   isStreaming = $state(false);
   isConfigured = $state(false);
+  /** Whether a Tavily key is saved (web search can actually run). */
+  hasTavilyKey = $state(false);
+  /** Transient tool-activity line shown during a turn (e.g. "Searching…"). */
+  searchStatus = $state<string | null>(null);
   settings = $state<AISettings>(loadSettings());
 
   private docId: string | null = null;
@@ -158,11 +171,17 @@ class AssistantStore {
 
   async init() {
     this.isConfigured = await api.hasApiKey(this.settings.provider);
+    this.hasTavilyKey = await api.hasTavilyKey();
     if (this.listening) return; // re-init (e.g. remount): refresh key status only
     this.listening = true;
     this.unlisteners = await Promise.all([
       listen<StreamToken>("assistant:token", (e) => {
-        if (e.payload.id === this.activeStreamId) this.appendToken(e.payload.text);
+        if (e.payload.id !== this.activeStreamId) return;
+        this.searchStatus = null; // first reply token ends the tool-activity line
+        this.appendToken(e.payload.text);
+      }),
+      listen<StreamStatus>("assistant:status", (e) => {
+        if (e.payload.id === this.activeStreamId) this.searchStatus = e.payload.message;
       }),
       listen<StreamUsage>("assistant:usage", (e) => {
         if (e.payload.id === this.activeStreamId) this.recordUsage(e.payload);
@@ -177,6 +196,7 @@ class AssistantStore {
         if (e.payload.id !== this.activeStreamId) return;
         this.activeStreamId = null;
         this.isStreaming = false;
+        this.searchStatus = null;
         const errored = this.streamErrored;
         this.streamErrored = false;
         // The reply did NOT complete on its own — it was either superseded by
@@ -345,6 +365,7 @@ class AssistantStore {
         toApiMessages(capHistory($state.snapshot(this.messages), this.historyBudget())),
         documentContent,
         references,
+        this.settings.webSearch,
         this.settings.voice || null,
       );
       // the request was accepted (key present, stream started) — only now
@@ -371,6 +392,7 @@ class AssistantStore {
     this.activeStreamId = null;
     this.isStreaming = false;
     this.streamErrored = false;
+    this.searchStatus = null;
     await api.stopAssistant();
     await this.persist();
   }
@@ -394,6 +416,26 @@ class AssistantStore {
   async removeKey() {
     await api.deleteApiKey(this.settings.provider);
     this.isConfigured = false;
+  }
+
+  async saveTavilyKey(key: string) {
+    await api.setTavilyKey(key);
+    this.hasTavilyKey = true;
+  }
+
+  async removeTavilyKey() {
+    await api.deleteTavilyKey();
+    this.hasTavilyKey = false;
+  }
+
+  /** Toggle web search. Turning it on without a Tavily key is rejected (the
+      caller should surface the reason and open Settings) so the toggle never
+      sits "on" while every search would fail. Returns whether it is now on. */
+  async toggleWebSearch(): Promise<boolean> {
+    const next = !this.settings.webSearch;
+    if (next && !this.hasTavilyKey) return false;
+    await this.updateSettings({ ...this.settings, webSearch: next });
+    return next;
   }
 }
 

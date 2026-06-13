@@ -294,3 +294,32 @@ via kind+section-gated `preventDefault`); accent-line drop indicators in
 `app.css`. 7 new storage tests, all 73 green; `pnpm check` 0/0. (Full
 implementation plan removed in the 2026-06-11 tasks/ cleanup — it lives in git
 history + the shipped code.)
+
+## DONE — AI web search via Tavily (toggleable) — shipped 2026-06-13
+
+Turned the single-pass chat stream into an **agentic tool-use loop** so the
+assistant can search the web (BYOK Tavily) and cite sources inline. Works on
+**both providers** (Anthropic content-block `tool_use` + OpenRouter OpenAI-style
+`tool_calls`) over a shared executor.
+
+- `websearch.rs`: `search()` (POST api.tavily.com/search, key in body) +
+  `format_results()` (title — url + snippet, so the model can cite); depth
+  `advanced`, 5 results.
+- `ai.rs`: generalized key storage (`store/read/remove_key` by name) + Tavily
+  key (`tavily-api-key`, same keychain/dev-keys mechanism); `web_search` tool
+  defs for both wire formats; `web_search_section()` in the chat prompt (cite
+  with inline markdown links); `stream_anthropic`/`stream_openrouter` rewritten
+  as per-round runners (`stream_*_round`) inside a loop capped at
+  `MAX_SEARCH_ROUNDS = 4`. **Invariants:** tool turns are loop-local (never
+  persisted — only final text + optional compaction block); on Anthropic search
+  turns adaptive thinking is omitted (avoids signed-thinking-block replay);
+  compaction stays on. `assistant:status` event drives a "Searching the web…"
+  line.
+- Commands: `send_assistant_message` gains `web_search`; new `set/has/delete_
+  tavily_key`. Frontend: `AISettings.webSearch` + globe toggle in the chat input
+  (guarded — turning on without a key opens Settings), Tavily key field in
+  Settings, `searchStatus` indicator.
+- Tests: 5 new (format_results, tool injection + thinking-gating, prompt
+  section, OpenAI tool shape); **95 Rust tests green**, `pnpm check` 0/0, clippy
+  clean. Live key-in-hand verification (toggle on → ask a current-events
+  question → cited reply) is the user's step.
