@@ -24,6 +24,8 @@
   let keyInput = $state("");
   let keyError = $state("");
   let hasSavedKey = $state(false);
+  let tavilyKeyInput = $state("");
+  let hasSavedTavilyKey = $state(false);
 
   // re-seed the form from saved settings each time the dialog opens
   $effect(() => {
@@ -32,7 +34,9 @@
       formModel = assistant.settings.model;
       formVoice = assistant.settings.voice;
       keyInput = "";
+      tavilyKeyInput = "";
       keyError = "";
+      void api.hasTavilyKey().then((has) => (hasSavedTavilyKey = has));
     }
   });
 
@@ -51,20 +55,34 @@
   async function save(e: Event) {
     e.preventDefault();
     keyError = "";
+    // Snapshot the inputs BEFORE any await: updateSettings() mutates
+    // assistant.settings, which re-runs the re-seed $effect and would clear the
+    // bound key fields mid-save (the writes below would then see empty strings).
+    const provider = formProvider;
+    const model = formModel.trim();
+    const voice = formVoice.trim();
+    const newKey = keyInput.trim();
+    const newTavilyKey = tavilyKeyInput.trim();
     try {
+      // settings first so saveKey() stores under the (possibly changed) provider
       await assistant.updateSettings({
-        provider: formProvider,
-        model: formModel.trim(),
-        voice: formVoice.trim(),
+        ...assistant.settings,
+        provider,
+        model,
+        voice,
       });
-      if (keyInput.trim()) {
-        await assistant.saveKey(keyInput.trim());
+      if (newKey) {
+        await assistant.saveKey(newKey);
+      }
+      if (newTavilyKey) {
+        await assistant.saveTavilyKey(newTavilyKey);
       }
       if (!assistant.isConfigured) {
         keyError = "Enter an API key for this provider to use the assistant.";
         return;
       }
       keyInput = "";
+      tavilyKeyInput = "";
       onClose();
     } catch (err) {
       keyError = String(err);
@@ -167,6 +185,25 @@
           {import.meta.env.DEV
             ? "Dev build: keys are stored in a local file in the app data folder (keychain is skipped to avoid password prompts)."
             : "Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider."}
+        </p>
+
+        <label class="dialog-label" for="settings-tavily-key">Web search key (Tavily)</label>
+        <input
+          id="settings-tavily-key"
+          class="dialog-input"
+          type="password"
+          placeholder={hasSavedTavilyKey ? "Key saved — leave blank to keep it" : "tvly-..."}
+          bind:value={tavilyKeyInput}
+          autocomplete="off"
+        />
+        <p class="assistant-key-status">
+          {hasSavedTavilyKey
+            ? "✓ A Tavily key is saved. Fill this in only to replace it."
+            : "No Tavily key saved. Add one to let the assistant search the web."}
+        </p>
+        <p class="assistant-key-note">
+          The assistant searches the web with Tavily when you toggle search on in the chat.
+          Get a free key at app.tavily.com (1,000 searches/month).
         </p>
       </form>
 

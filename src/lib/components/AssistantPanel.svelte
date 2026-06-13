@@ -147,6 +147,17 @@
     copiedIdx = idx;
     setTimeout(() => (copiedIdx = null), 2000);
   }
+
+  /** Toggle web search. Turning it on needs a Tavily key — if none is saved,
+      explain and open Settings rather than enabling a no-op. */
+  async function toggleSearch() {
+    if (!assistant.settings.webSearch && !assistant.hasTavilyKey) {
+      toast.error("Add a Tavily API key in Settings to turn on web search.");
+      onOpenSettings();
+      return;
+    }
+    await assistant.toggleWebSearch();
+  }
 </script>
 
 {#if !assistant.isConfigured}
@@ -246,7 +257,16 @@
       {/each}
       {#if assistant.isStreaming}
         <div class="assistant-streaming">
-          <span class="assistant-streaming-dot"></span>
+          {#if assistant.searchStatus}
+            <svg class="assistant-search-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+            <span class="assistant-search-status">{assistant.searchStatus}</span>
+          {:else}
+            <span class="assistant-streaming-dot"></span>
+          {/if}
         </div>
       {/if}
     </div>
@@ -288,6 +308,20 @@
         disabled={assistant.isStreaming}
       ></textarea>
       <div class="assistant-input-actions">
+        <button
+          type="button"
+          class="assistant-search-toggle"
+          class:assistant-search-toggle--active={assistant.settings.webSearch}
+          onclick={toggleSearch}
+          aria-pressed={assistant.settings.webSearch}
+          title={assistant.settings.webSearch ? "Web search on — click to turn off" : "Web search off — click to turn on"}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M2 12h20" />
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+          </svg>
+        </button>
         {#if assistant.isStreaming}
           <button type="button" class="assistant-send-btn" onclick={() => void assistant.stop()} title="Stop">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
