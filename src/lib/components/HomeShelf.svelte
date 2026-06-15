@@ -66,6 +66,7 @@
   // shelf body for ranked results.
   let searchQuery = $state("");
   let searchResults = $state<SearchHit[]>([]);
+  let searchFailed = $state(false);
   let searchSeq = 0;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   const searching = $derived(searchQuery.trim().length > 0);
@@ -75,15 +76,23 @@
     clearTimeout(searchTimer);
     if (!q) {
       searchResults = [];
+      searchFailed = false;
       return;
     }
     const seq = ++searchSeq;
     searchTimer = setTimeout(async () => {
       try {
         const hits = await api.searchDocuments(q);
-        if (seq === searchSeq) searchResults = hits;
+        if (seq === searchSeq) {
+          searchResults = hits;
+          searchFailed = false;
+        }
       } catch {
-        if (seq === searchSeq) searchResults = [];
+        // distinguish a real failure from a genuine no-match
+        if (seq === searchSeq) {
+          searchResults = [];
+          searchFailed = true;
+        }
       }
     }, 150);
     return () => clearTimeout(searchTimer);
@@ -308,7 +317,7 @@
           </button>
         {/each}
         {#if searchResults.length === 0}
-          <span class="shelf-quiet">No matches</span>
+          <span class="shelf-quiet">{searchFailed ? "Search failed — try again." : "No matches"}</span>
         {/if}
       </section>
     {:else if isEmpty && !creatingProject}

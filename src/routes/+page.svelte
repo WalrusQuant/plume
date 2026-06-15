@@ -279,21 +279,28 @@
       slower in-flight content fetch can detect it was superseded and bail —
       mirrors the assistant store's loadSeq guard. */
   let docLoadSeq = 0;
+  /** True while a doc's content is being fetched — drives the editor-pane spinner. */
+  let docLoading = $state(false);
 
   async function selectDocument(id: string) {
     if (id === selectedDocId) return;
     await flushSave();
     const seq = ++docLoadSeq;
     editorView = null;
-    const loaded = await api.getDocumentContent(id);
-    if (seq !== docLoadSeq) return; // a newer switch (or home/delete) superseded this
-    content = loaded;
-    selectedDocId = id;
-    schedulePreview(content);
-    wordCount = countWords(content);
-    void assistant.loadFor(id);
-    inlineEdit.setContext(id, () => content, refreshHistoryIfOpen);
-    if (rightTab === "history") void loadSnapshots();
+    docLoading = true;
+    try {
+      const loaded = await api.getDocumentContent(id);
+      if (seq !== docLoadSeq) return; // a newer switch superseded this; it owns the flag
+      content = loaded;
+      selectedDocId = id;
+      schedulePreview(content);
+      wordCount = countWords(content);
+      void assistant.loadFor(id);
+      inlineEdit.setContext(id, () => content, refreshHistoryIfOpen);
+      if (rightTab === "history") void loadSnapshots();
+    } finally {
+      if (seq === docLoadSeq) docLoading = false;
+    }
   }
 
   /** Refresh the history panel after an inline edit lands an ai-edit snapshot. */
@@ -326,6 +333,7 @@
   async function goHome() {
     await flushSave();
     docLoadSeq++; // cancel any in-flight document load
+    docLoading = false;
     editorView = null;
     selectedDocId = null;
     void assistant.loadFor(null);
@@ -598,10 +606,12 @@
   }
 
   async function deleteDocument(id: string) {
+    const name = documents.find((d) => d.id === id)?.name ?? "Document";
     await api.deleteDocument(id);
     pendingSaves.delete(id); // never retry a save against a deleted row
     lastSnapshotAt.delete(id);
     documents = documents.filter((d) => d.id !== id);
+    toast.show(`Deleted “${name}”`, "info");
     // if the deleted idea is open in the capture modal, close it
     if (ideaModalId === id) ideaModalOpen = false;
     if (selectedDocId === id) {
@@ -774,6 +784,9 @@
       <Toolbar {editorView} />
       <div class="editor-container">
         <div class="editor-pane">
+          {#if docLoading}
+            <div class="pane-loading"><div class="loading-spinner"></div></div>
+          {/if}
           {#key selectedDoc.id}
             <Editor
               {content}

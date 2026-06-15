@@ -43,9 +43,17 @@
     }
   }
 
+  // Re-render the relative labels on a slow tick so "just now" doesn't get stuck
+  // for minutes. `relativeTime` reads `now`, so the template tracks it.
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 60_000);
+    return () => clearInterval(t);
+  });
+
   function relativeTime(iso: string): string {
     const then = new Date(iso).getTime();
-    const secs = Math.round((Date.now() - then) / 1000);
+    const secs = Math.round((now - then) / 1000);
     if (secs < 45) return "just now";
     const mins = Math.round(secs / 60);
     if (mins < 60) return `${mins}m ago`;

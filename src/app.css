@@ -50,16 +50,17 @@
   --accent: #4a9eff;
   --accent-dim: #3a7ecc;
   --accent-surface: rgba(74, 158, 255, 0.08);
+  --accent-surface-strong: rgba(74, 158, 255, 0.15);
   --accent-text: #ffffff;
 
   --status-bg: #151515;
-  --status-text: #555555;
+  --status-text: #6f6f6f;
 
   --border: #2a2a2a;
   --border-light: #3a3a3a;
   --text-primary: #cccccc;
   --text-secondary: #999999;
-  --text-tertiary: #666666;
+  --text-tertiary: #828282;
   --danger: #f85149;
   --danger-surface: rgba(248, 81, 73, 0.1);
   --success: #3fb950;
@@ -118,6 +119,7 @@
   --accent: #0969da;
   --accent-dim: #0550ae;
   --accent-surface: rgba(9, 105, 218, 0.06);
+  --accent-surface-strong: rgba(9, 105, 218, 0.12);
   --accent-text: #ffffff;
 
   --status-bg: #f0f0f0;
@@ -509,7 +511,8 @@ button:focus-visible {
   font-family: var(--font-sans);
   cursor: pointer;
   border-radius: var(--radius-sm);
-  opacity: 0;
+  /* faintly visible so the resting-projects concept is discoverable, not hidden */
+  opacity: 0.45;
   transition: opacity var(--transition), color var(--transition);
 }
 
@@ -1418,6 +1421,16 @@ button:focus-visible {
   color: var(--toolbar-text-hover);
 }
 
+/* App-specific actions (Multiply / Export) carry a text label so they're not
+   just ambiguous glyphs; the universal Settings/Theme stay icon-only. */
+.topbar-labeled-btn {
+  width: auto;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+}
+
 .topbar-divider {
   width: 1px;
   height: 20px;
@@ -1499,6 +1512,18 @@ button:focus-visible {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  background: var(--editor-bg);
+  position: relative;
+}
+
+/* Brief overlay while a document's content loads (rarely seen — SQLite is fast). */
+.pane-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: var(--editor-bg);
 }
 
@@ -1892,7 +1917,7 @@ button:focus-visible {
 }
 
 .dialog-type-card--active {
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border-color: var(--accent);
 }
 
@@ -1910,7 +1935,7 @@ button:focus-visible {
 
 .dialog-type-card--active .dialog-type-icon {
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: var(--accent-surface-strong);
 }
 
 .dialog-type-info {
@@ -2015,7 +2040,7 @@ button:focus-visible {
 
 .dialog-btn--primary {
   background: var(--accent);
-  color: white;
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
@@ -2255,8 +2280,8 @@ button:focus-visible {
 }
 
 .history-badge--restore {
-  color: #d97706;
-  border-color: #d97706;
+  color: var(--warning);
+  border-color: var(--warning);
 }
 
 .history-time {
@@ -2342,7 +2367,7 @@ button:focus-visible {
 }
 
 .settings-provider-btn--active {
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -2458,7 +2483,7 @@ button:focus-visible {
 }
 
 .assistant-msg--user {
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border-radius: 8px;
   padding: 8px 12px;
   align-self: flex-end;
@@ -2503,7 +2528,7 @@ button:focus-visible {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border: 1px solid var(--accent);
   border-radius: 4px;
   color: var(--accent);
@@ -2514,7 +2539,7 @@ button:focus-visible {
 }
 
 .assistant-apply-btn:hover {
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--accent-surface-strong);
 }
 
 .assistant-streaming {
@@ -2624,7 +2649,7 @@ button:focus-visible {
   background: var(--accent);
   border: none;
   border-radius: 6px;
-  color: white;
+  color: var(--accent-text);
   cursor: pointer;
   transition: background 0.15s ease;
 }

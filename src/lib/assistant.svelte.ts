@@ -356,8 +356,15 @@ class AssistantStore {
       : OPENROUTER_HISTORY_BUDGET;
   }
 
-  async send(userMessage: string, documentContent: string, references: DocReference[] = []) {
-    if (this.isStreaming || !this.activeChatId) return;
+  /** Returns true once the request is accepted (stream started); false if it
+      was rejected up front or the send failed — the caller can then restore the
+      user's input instead of making them retype it. */
+  async send(
+    userMessage: string,
+    documentContent: string,
+    references: DocReference[] = [],
+  ): Promise<boolean> {
+    if (this.isStreaming || !this.activeChatId) return false;
     const chat = this.activeChat;
     this.messages = [...this.messages, { role: "user", content: userMessage }];
     this.isStreaming = true;
@@ -386,6 +393,7 @@ class AssistantStore {
       if (chat && chat.title === DEFAULT_CHAT_TITLE) {
         void this.renameChat(chat.id, deriveTitle(userMessage));
       }
+      return true;
     } catch (e) {
       toast.error(`Sending message failed: ${e}`);
       this.isStreaming = false;
@@ -396,6 +404,7 @@ class AssistantStore {
       if (last?.role === "user" && last.content === userMessage) {
         this.messages = this.messages.slice(0, -1);
       }
+      return false;
     }
   }
 

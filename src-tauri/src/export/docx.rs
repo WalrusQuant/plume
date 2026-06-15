@@ -498,11 +498,20 @@ fn add_footnote<'a>(
     let mut fnote = Footnote::new();
     let mut added = false;
     for block in def.children() {
-        if matches!(&block.data.borrow().value, NodeValue::Paragraph) {
-            let p = add_inlines(Paragraph::new(), block, Fmt::default(), BODY_SIZE, fns);
-            fnote = fnote.add_content(p);
-            added = true;
-        }
+        let is_para = matches!(&block.data.borrow().value, NodeValue::Paragraph);
+        let p = if is_para {
+            add_inlines(Paragraph::new(), block, Fmt::default(), BODY_SIZE, fns)
+        } else {
+            // Word footnotes take paragraphs; a list/code/etc. block would be
+            // dropped, so flatten it to text rather than lose the content.
+            let text = node_text(block);
+            if text.trim().is_empty() {
+                continue;
+            }
+            Paragraph::new().add_run(make_run(&text, Fmt::default(), BODY_SIZE))
+        };
+        fnote = fnote.add_content(p);
+        added = true;
     }
     if !added {
         fnote = fnote.add_content(Paragraph::new());

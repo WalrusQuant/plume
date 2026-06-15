@@ -93,6 +93,14 @@
     assistant.contextLimit != null && contextTokens > 0.85 * assistant.contextLimit,
   );
 
+  /** A user turn with no reply after it and nothing streaming — e.g. stopped
+      before the first token. Marks it so the silence isn't unexplained. */
+  const danglingUser = $derived(
+    !assistant.isStreaming &&
+      assistant.messages.length > 0 &&
+      assistant.messages[assistant.messages.length - 1].role === "user",
+  );
+
   $effect(() => {
     void assistant.messages.length;
     void assistant.messages[assistant.messages.length - 1]?.content;
@@ -116,7 +124,12 @@
     mentions = [];
     mentionQuery = null;
     const references = await buildReferences(pendingMentions);
-    void assistant.send(text, getDocumentContent(), references);
+    const ok = await assistant.send(text, getDocumentContent(), references);
+    if (!ok) {
+      // send was rejected/failed — give the user their message back to retry
+      input = text;
+      mentions = pendingMentions;
+    }
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -218,7 +231,7 @@
               ? "Approaching the context limit — older messages will start dropping"
               : "Context size after the last turn"}
           >
-            ~{contextTokens.toLocaleString()} tok
+            ~{contextTokens.toLocaleString()} tokens
           </span>
         {/if}
         <button class="assistant-header-btn" onclick={() => guard(assistant.newChat(), "New chat")} title="New chat">
@@ -262,7 +275,12 @@
         <div class="assistant-msg assistant-msg--{msg.role}">
           <div class="assistant-msg-content">{msg.content}</div>
           {#if msg.role === "assistant" && msg.inputTokens != null}
-            <div class="assistant-msg-usage">{msg.inputTokens} in · {msg.outputTokens} out</div>
+            <div
+              class="assistant-msg-usage"
+              title="Tokens used — {msg.inputTokens} input, {msg.outputTokens} output"
+            >
+              {(msg.inputTokens + (msg.outputTokens ?? 0)).toLocaleString()} tokens
+            </div>
           {/if}
           {#if msg.role === "assistant" && !assistant.isStreaming}
             {@const block = extractBlock(msg.content)}
@@ -297,6 +315,9 @@
             <span class="assistant-streaming-dot"></span>
           {/if}
         </div>
+      {/if}
+      {#if danglingUser}
+        <div class="assistant-no-response">No response — the reply was stopped before it started.</div>
       {/if}
     </div>
 
@@ -457,5 +478,11 @@
     color: var(--text-tertiary);
     border-bottom: 1px solid var(--border);
     background: var(--bg-secondary);
+  }
+  .assistant-no-response {
+    padding: 4px 12px 8px;
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--text-tertiary);
   }
 </style>

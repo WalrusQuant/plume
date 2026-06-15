@@ -202,47 +202,54 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## 🔵 LOW — polish
 
-- [ ] **L1. No loading state opening a doc / preview flicker.** `getDocumentContent`
+> **11/12 fixed 2026-06-15.** `pnpm check` 0/0, `cargo test` 95/95. Scope notes:
+> L1 adds the doc-open loading state; the preview-scroll-preservation half is
+> deferred (would need Preview to diff/patch the HTML — risks the raw-HTML-escape
+> invariant). L7 is **partial [~]**: non-paragraph footnote content now flattens
+> to text; the "N images couldn't embed" success-message notice is deferred (it
+> needs threading a count through the export return contract + docx tests).
+
+- [x] **L1. No loading state opening a doc / preview flicker.** `getDocumentContent`
   shows the previous doc until the fetch resolves (`+page.svelte:246-257`); preview
   re-`{@html}`-injects wholesale resetting scroll (`Preview.svelte:11`,
   `+page.svelte:132-152`). → Loading state + preserve scroll / patch HTML.
 
-- [ ] **L2. Search failures swallowed.** `catch {}` → `searchResults = []`
+- [x] **L2. Search failures swallowed.** `catch {}` → `searchResults = []`
   (`Sidebar.svelte:179-187`, `HomeShelf.svelte:77-85`) — a backend error is shown as
   "No matches." → Distinguish error from empty; toast on failure.
 
-- [ ] **L3. Hardcoded colors bypass the design system.** Literal `rgba(74,158,255,…)`
+- [x] **L3. Hardcoded colors bypass the design system.** Literal `rgba(74,158,255,…)`
   and `color: white` (`app.css:1808-1809,1825-1827,1927,2254,2370,2415,2426,2536`)
   don't switch for light theme (light accent is `#0969da`). → Use `var(--accent-surface)` / `var(--accent-text)`.
 
-- [ ] **L4. Low-contrast tertiary text.** `--text-tertiary:#666` / `--status-text:#555`
+- [x] **L4. Low-contrast tertiary text.** `--text-tertiary:#666` / `--status-text:#555`
   on dark bg below WCAG AA at 11px (`app.css:29,56-62,169`). → Bump contrast or reserve for larger text.
 
-- [ ] **L5. Icon-only Multiply/Export/Settings/Theme buttons.** Four near-identical
+- [x] **L5. Icon-only Multiply/Export/Settings/Theme buttons.** Four near-identical
   30px glyphs, app-specific concepts disambiguated only by `title`
   (`TopBar.svelte:94-139`). → Add labels or visually distinguish.
 
-- [ ] **L6. "Rest project" control is `opacity:0` until hover** (`HomeShelf.svelte:155-164`,
+- [x] **L6. "Rest project" control is `opacity:0` until hover** (`HomeShelf.svelte:155-164`,
   `app.css:502-519`) — the whole resting-projects concept is invisible. → Keep faintly visible.
 
-- [ ] **L7. docx silently drops content.** Remote/relative images degrade to a link
+- [~] **L7. docx silently drops content.** Remote/relative images degrade to a link
   (`docx.rs:466-485,515-534`); non-paragraph footnote content dropped (`docx.rs:498-509`).
   → Note dropped images in the success message; render non-paragraph footnote blocks.
 
-- [ ] **L8. Token/usage jargon for non-technical users.** "~12,345 tok" / "123 in · 45 out"
+- [x] **L8. Token/usage jargon for non-technical users.** "~12,345 tok" / "123 in · 45 out"
   (`AssistantPanel.svelte:196-200,235-236`). → Hide or soften behind a label.
 
-- [ ] **L9. `relativeTime` never ticks** (`HistoryPanel.svelte:33-44`) — "just now" stays
+- [x] **L9. `relativeTime` never ticks** (`HistoryPanel.svelte:33-44`) — "just now" stays
   for minutes. → Recompute on an interval.
 
-- [ ] **L10. Deleting the open doc jumps to Home with no toast** (`+page.svelte:513-526`)
+- [x] **L10. Deleting the open doc jumps to Home with no toast** (`+page.svelte:513-526`)
   — feels like the app lost the doc. → Toast "Deleted '<name>'."
 
-- [ ] **L11. Assistant send failure clears the input** (`AssistantPanel.svelte:96-108`,
+- [x] **L11. Assistant send failure clears the input** (`AssistantPanel.svelte:96-108`,
   `assistant.svelte.ts:377-387`) — rollback restores the thread, not the textarea, so
   the user must retype. → Restore input/mentions on send failure.
 
-- [ ] **L12. Stop before first token leaves an empty user turn** (`assistant.svelte.ts:350-352`)
+- [x] **L12. Stop before first token leaves an empty user turn** (`assistant.svelte.ts:350-352`)
   — relies on `toApiMessages` merge to stay API-valid; user sees a sent message with no
   reply and no explanation. → Subtle "no response" marker.
 
