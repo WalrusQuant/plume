@@ -50,16 +50,17 @@
   --accent: #4a9eff;
   --accent-dim: #3a7ecc;
   --accent-surface: rgba(74, 158, 255, 0.08);
+  --accent-surface-strong: rgba(74, 158, 255, 0.15);
   --accent-text: #ffffff;
 
   --status-bg: #151515;
-  --status-text: #555555;
+  --status-text: #6f6f6f;
 
   --border: #2a2a2a;
   --border-light: #3a3a3a;
   --text-primary: #cccccc;
   --text-secondary: #999999;
-  --text-tertiary: #666666;
+  --text-tertiary: #828282;
   --danger: #f85149;
   --danger-surface: rgba(248, 81, 73, 0.1);
   --success: #3fb950;
@@ -118,6 +119,7 @@
   --accent: #0969da;
   --accent-dim: #0550ae;
   --accent-surface: rgba(9, 105, 218, 0.06);
+  --accent-surface-strong: rgba(9, 105, 218, 0.12);
   --accent-text: #ffffff;
 
   --status-bg: #f0f0f0;
@@ -509,7 +511,8 @@ button:focus-visible {
   font-family: var(--font-sans);
   cursor: pointer;
   border-radius: var(--radius-sm);
-  opacity: 0;
+  /* faintly visible so the resting-projects concept is discoverable, not hidden */
+  opacity: 0.45;
   transition: opacity var(--transition), color var(--transition);
 }
 
@@ -725,6 +728,36 @@ button:focus-visible {
 
 .shelf-empty p {
   font-size: 13px;
+  max-width: 42ch;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.shelf-empty p strong {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+/* First-run AI nudge — visible but calm; the one place a new user is told the
+   writing help exists and where to turn it on. */
+.shelf-empty-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 18px;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--accent);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.shelf-empty-ai:hover {
+  background: var(--shelf-hover);
 }
 
 .shelf-empty-actions {
@@ -1031,6 +1064,34 @@ button:focus-visible {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+/* The expansion indicator doubles as a cancel button: the spinner shows while
+   idle, swapped for an × on hover/focus so a stuck run is always escapable. */
+.sidebar-idea-cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.sidebar-idea-cancel-x {
+  display: none;
+}
+.sidebar-idea-cancel:hover .sidebar-idea-spinner,
+.sidebar-idea-cancel:focus-visible .sidebar-idea-spinner {
+  display: none;
+}
+.sidebar-idea-cancel:hover .sidebar-idea-cancel-x,
+.sidebar-idea-cancel:focus-visible .sidebar-idea-cancel-x {
+  display: block;
+  color: var(--error, #e5484d);
 }
 
 .sidebar-expand-menu {
@@ -1360,6 +1421,16 @@ button:focus-visible {
   color: var(--toolbar-text-hover);
 }
 
+/* App-specific actions (Multiply / Export) carry a text label so they're not
+   just ambiguous glyphs; the universal Settings/Theme stay icon-only. */
+.topbar-labeled-btn {
+  width: auto;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+}
+
 .topbar-divider {
   width: 1px;
   height: 20px;
@@ -1442,6 +1513,18 @@ button:focus-visible {
   min-width: 0;
   overflow: hidden;
   background: var(--editor-bg);
+  position: relative;
+}
+
+/* Brief overlay while a document's content loads (rarely seen — SQLite is fast). */
+.pane-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--editor-bg);
 }
 
 .editor-wrapper {
@@ -1464,6 +1547,34 @@ button:focus-visible {
   background: var(--preview-bg);
   border-left: 1px solid var(--border);
   scrollbar-width: thin;
+}
+
+/* ---------------------------------------------------------
+   Responsive — the layout targets a roomy window. Below these
+   widths the side-by-side editor/preview get crushed, so stack
+   them and tighten the sidebar. The :not(--collapsed) guard
+   leaves the sidebar-toggle and home-shelf (zero-width) intact.
+   --------------------------------------------------------- */
+@media (max-width: 900px) {
+  /* editor above the tabbed right pane instead of beside it */
+  .editor-container {
+    flex-direction: column;
+  }
+  .editor-pane,
+  .preview-pane {
+    flex: 1 1 50%;
+    min-height: 0;
+  }
+  .preview-pane {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 760px) {
+  .app-layout:not(.app-layout--collapsed) {
+    grid-template-columns: 200px 1fr;
+  }
 }
 
 /* ---------------------------------------------------------
@@ -1806,7 +1917,7 @@ button:focus-visible {
 }
 
 .dialog-type-card--active {
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border-color: var(--accent);
 }
 
@@ -1824,7 +1935,7 @@ button:focus-visible {
 
 .dialog-type-card--active .dialog-type-icon {
   color: var(--accent);
-  background: rgba(74, 158, 255, 0.12);
+  background: var(--accent-surface-strong);
 }
 
 .dialog-type-info {
@@ -1898,6 +2009,11 @@ button:focus-visible {
   gap: 8px;
   padding: 16px 20px;
   border-top: 1px solid var(--border);
+  /* keep the primary action visible when a long dialog body scrolls (.dialog
+     is the scroll container) */
+  position: sticky;
+  bottom: 0;
+  background: var(--sidebar-bg);
 }
 
 .dialog-btn {
@@ -1924,7 +2040,7 @@ button:focus-visible {
 
 .dialog-btn--primary {
   background: var(--accent);
-  color: white;
+  color: var(--accent-text);
   border-color: var(--accent);
 }
 
@@ -2164,8 +2280,8 @@ button:focus-visible {
 }
 
 .history-badge--restore {
-  color: #d97706;
-  border-color: #d97706;
+  color: var(--warning);
+  border-color: var(--warning);
 }
 
 .history-time {
@@ -2251,7 +2367,7 @@ button:focus-visible {
 }
 
 .settings-provider-btn--active {
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border-color: var(--accent);
   color: var(--accent);
 }
@@ -2367,7 +2483,7 @@ button:focus-visible {
 }
 
 .assistant-msg--user {
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border-radius: 8px;
   padding: 8px 12px;
   align-self: flex-end;
@@ -2412,7 +2528,7 @@ button:focus-visible {
   align-items: center;
   gap: 4px;
   padding: 3px 10px;
-  background: rgba(74, 158, 255, 0.08);
+  background: var(--accent-surface);
   border: 1px solid var(--accent);
   border-radius: 4px;
   color: var(--accent);
@@ -2423,7 +2539,7 @@ button:focus-visible {
 }
 
 .assistant-apply-btn:hover {
-  background: rgba(74, 158, 255, 0.15);
+  background: var(--accent-surface-strong);
 }
 
 .assistant-streaming {
@@ -2533,7 +2649,7 @@ button:focus-visible {
   background: var(--accent);
   border: none;
   border-radius: 6px;
-  color: white;
+  color: var(--accent-text);
   cursor: pointer;
   transition: background 0.15s ease;
 }

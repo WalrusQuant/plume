@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { assistant } from "$lib/assistant.svelte";
+  import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
   import { api, type Document, type DocReference } from "$lib/api";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
@@ -87,6 +88,19 @@
     return 0;
   });
 
+  /** Within 85% of a hard context limit (OpenRouter) — warn before turns drop. */
+  const nearLimit = $derived(
+    assistant.contextLimit != null && contextTokens > 0.85 * assistant.contextLimit,
+  );
+
+  /** A user turn with no reply after it and nothing streaming — e.g. stopped
+      before the first token. Marks it so the silence isn't unexplained. */
+  const danglingUser = $derived(
+    !assistant.isStreaming &&
+      assistant.messages.length > 0 &&
+      assistant.messages[assistant.messages.length - 1].role === "user",
+  );
+
   $effect(() => {
     void assistant.messages.length;
     void assistant.messages[assistant.messages.length - 1]?.content;
@@ -97,6 +111,12 @@
     e.preventDefault();
     const text = input.trim();
     if (!text || assistant.isStreaming) return;
+    // a headless generation owns the single AI slot; sending now would abort it
+    // and discard its draft — block before consuming the input so it isn't lost
+    if (aiBusy.busy) {
+      toast.error(`Wait for the ${aiBusy.label} to finish before sending.`);
+      return;
+    }
     // consume the input synchronously — a second Enter during the awaited
     // reference fetch must be a no-op, not a silently dropped message
     const pendingMentions = mentions;
@@ -104,7 +124,12 @@
     mentions = [];
     mentionQuery = null;
     const references = await buildReferences(pendingMentions);
-    void assistant.send(text, getDocumentContent(), references);
+    const ok = await assistant.send(text, getDocumentContent(), references);
+    if (!ok) {
+      // send was rejected/failed — give the user their message back to retry
+      input = text;
+      mentions = pendingMentions;
+    }
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -142,8 +167,13 @@
     return block.length > 300 && /^#\s/m.test(block);
   }
 
-  function copyMessage(content: string, idx: number) {
-    void navigator.clipboard.writeText(content);
+  async function copyMessage(content: string, idx: number) {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (e) {
+      toast.error(`Couldn't copy: ${e}`); // don't flash a false "Copied!"
+      return;
+    }
     copiedIdx = idx;
     setTimeout(() => (copiedIdx = null), 2000);
   }
@@ -194,8 +224,14 @@
       </select>
       <div class="assistant-header-actions">
         {#if contextTokens > 0}
-          <span class="assistant-context" title="Context size after the last turn">
-            ~{contextTokens.toLocaleString()} tok
+          <span
+            class="assistant-context"
+            class:assistant-context--warn={nearLimit}
+            title={nearLimit
+              ? "Approaching the context limit — older messages will start dropping"
+              : "Context size after the last turn"}
+          >
+            ~{contextTokens.toLocaleString()} tokens
           </span>
         {/if}
         <button class="assistant-header-btn" onclick={() => guard(assistant.newChat(), "New chat")} title="New chat">
@@ -223,6 +259,12 @@
       </div>
     </div>
 
+    {#if assistant.historyTrimmed}
+      <div class="assistant-trim-note">
+        Older messages were dropped to fit the context limit.
+      </div>
+    {/if}
+
     <div class="assistant-messages" bind:this={messagesEl}>
       {#if assistant.messages.length === 0}
         <div class="assistant-welcome">
@@ -233,7 +275,12 @@
         <div class="assistant-msg assistant-msg--{msg.role}">
           <div class="assistant-msg-content">{msg.content}</div>
           {#if msg.role === "assistant" && msg.inputTokens != null}
-            <div class="assistant-msg-usage">{msg.inputTokens} in · {msg.outputTokens} out</div>
+            <div
+              class="assistant-msg-usage"
+              title="Tokens used — {msg.inputTokens} input, {msg.outputTokens} output"
+            >
+              {(msg.inputTokens + (msg.outputTokens ?? 0)).toLocaleString()} tokens
+            </div>
           {/if}
           {#if msg.role === "assistant" && !assistant.isStreaming}
             {@const block = extractBlock(msg.content)}
@@ -268,6 +315,9 @@
             <span class="assistant-streaming-dot"></span>
           {/if}
         </div>
+      {/if}
+      {#if danglingUser}
+        <div class="assistant-no-response">No response — the reply was stopped before it started.</div>
       {/if}
     </div>
 
@@ -418,5 +468,21 @@
   }
   .mention-chip-remove:hover {
     color: var(--text-primary);
+  }
+  .assistant-context--warn {
+    color: var(--error, #e5484d);
+  }
+  .assistant-trim-note {
+    padding: 6px 12px;
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+  }
+  .assistant-no-response {
+    padding: 4px 12px 8px;
+    font-size: 11.5px;
+    font-style: italic;
+    color: var(--text-tertiary);
   }
 </style>

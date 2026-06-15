@@ -20,6 +20,7 @@
     onNewIdea: () => void;
     onOpenIdea: (id: string) => void;
     onExpandIdea: (id: string, type: DocType, label: string) => void;
+    onCancelExpand: () => void;
     onConvertIdea: (id: string, type: DocType) => void;
     onRename: (id: string, name: string) => void;
     onDelete: (id: string) => void;
@@ -43,6 +44,7 @@
     onNewIdea,
     onOpenIdea,
     onExpandIdea,
+    onCancelExpand,
     onConvertIdea,
     onRename,
     onDelete,
@@ -164,6 +166,7 @@
   // can't overwrite newer ones.
   let searchQuery = $state("");
   let searchResults = $state<SearchHit[]>([]);
+  let searchFailed = $state(false);
   let searchSeq = 0;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   const searching = $derived(searchQuery.trim().length > 0);
@@ -173,15 +176,23 @@
     clearTimeout(searchTimer);
     if (!q) {
       searchResults = [];
+      searchFailed = false;
       return;
     }
     const seq = ++searchSeq;
     searchTimer = setTimeout(async () => {
       try {
         const hits = await api.searchDocuments(q);
-        if (seq === searchSeq) searchResults = hits;
+        if (seq === searchSeq) {
+          searchResults = hits;
+          searchFailed = false;
+        }
       } catch {
-        if (seq === searchSeq) searchResults = [];
+        // distinguish a real failure from a genuine no-match
+        if (seq === searchSeq) {
+          searchResults = [];
+          searchFailed = true;
+        }
       }
     }, 150);
     return () => clearTimeout(searchTimer);
@@ -354,7 +365,19 @@
       {/if}
     </div>
     {#if expandingId === doc.id}
-      <div class="sidebar-idea-spinner" title="Expanding…"></div>
+      <button
+        class="sidebar-idea-cancel"
+        onclick={(e) => {
+          e.stopPropagation();
+          onCancelExpand();
+        }}
+        title="Cancel expansion"
+      >
+        <span class="sidebar-idea-spinner"></span>
+        <svg class="sidebar-idea-cancel-x" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
     {:else}
       <div class="sidebar-item-actions">
           <button
@@ -482,7 +505,7 @@
         </button>
       {/each}
       {#if searchResults.length === 0}
-        <div class="sidebar-search-empty">No matches</div>
+        <div class="sidebar-search-empty">{searchFailed ? "Search failed — try again." : "No matches"}</div>
       {/if}
     </nav>
   {:else}

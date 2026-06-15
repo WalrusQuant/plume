@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { toast } from "$lib/toast.svelte";
+
   // Small capture/edit modal for ideas. Ideas are quick notes — they never open
   // in the big editor, so all capture and editing happens here. Reuses the
   // shared .dialog-* shell. Only rendered while `open` is true, so local title/
@@ -8,8 +10,9 @@
     mode: "new" | "edit";
     initialTitle: string;
     initialBody: string;
-    /** title === "" means "derive the name from the first line". */
-    onSave: (title: string, body: string) => void;
+    /** title === "" means "derive the name from the first line". Resolves once
+        the save persists, so the modal can stay open if it fails. */
+    onSave: (title: string, body: string) => Promise<void>;
     onClose: () => void;
   }
 
@@ -17,6 +20,9 @@
 
   let title = $state("");
   let body = $state("");
+  let saving = $state(false);
+
+  const dirty = $derived(title !== initialTitle || body !== initialBody);
 
   // Reseed the fields each time the modal opens (it stays mounted between
   // opens, so we can't rely on a fresh mount). While open, local edits aren't
@@ -35,23 +41,38 @@
     node.setSelectionRange(len, len);
   }
 
-  function handleSave() {
-    onSave(title.trim(), body);
+  async function handleSave() {
+    if (saving) return;
+    saving = true;
+    try {
+      await onSave(title.trim(), body); // await so a failed save keeps the text
+    } catch (e) {
+      toast.error(`Save idea failed: ${e}`);
+      return; // leave the modal open with the user's text intact
+    } finally {
+      saving = false;
+    }
+    onClose();
+  }
+
+  /** Dismiss, guarding unsaved edits so a stray click doesn't drop a captured idea. */
+  function requestClose() {
+    if (dirty && !confirm("Discard this idea?")) return;
     onClose();
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") requestClose();
     // Cmd/Ctrl+Enter saves; plain Enter must insert newlines in the textarea.
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
-      handleSave();
+      void handleSave();
     }
   }
 </script>
 
 {#if open}
-  <div class="dialog-overlay" onclick={onClose} role="presentation">
+  <div class="dialog-overlay" onclick={requestClose} role="presentation">
     <div
       class="dialog"
       onclick={(e) => e.stopPropagation()}
@@ -61,7 +82,7 @@
     >
       <div class="dialog-header">
         <h3 class="dialog-title">{mode === "new" ? "New Idea" : "Edit Idea"}</h3>
-        <button class="dialog-close" onclick={onClose} title="Close">
+        <button class="dialog-close" onclick={requestClose} title="Close">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
@@ -85,11 +106,21 @@
       </div>
 
       <div class="dialog-footer">
-        <button class="dialog-btn dialog-btn--secondary" onclick={onClose}>Cancel</button>
-        <button class="dialog-btn dialog-btn--primary" onclick={handleSave}>
+        <span class="idea-save-hint">⌘↵ to save</span>
+        <button class="dialog-btn dialog-btn--secondary" onclick={requestClose}>Cancel</button>
+        <button class="dialog-btn dialog-btn--primary" onclick={handleSave} disabled={saving}>
           {mode === "new" ? "Save" : "Save changes"}
         </button>
       </div>
     </div>
   </div>
 {/if}
+
+<style>
+  .idea-save-hint {
+    margin-right: auto;
+    align-self: center;
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+  }
+</style>

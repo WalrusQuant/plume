@@ -3,6 +3,7 @@
   import type { Theme } from "$lib/editor/themes";
   import { buildSidebarTree, type SidebarFolder } from "$lib/buildSidebarTree";
   import { formatDate } from "$lib/formatDate";
+  import { clickOutside } from "$lib/clickOutside";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
 
   interface Props {
@@ -16,6 +17,8 @@
     onNewPlan: () => void;
     onNewIdea: () => void;
     onToggleActive: (id: string, active: boolean) => void;
+    /** Whether an AI provider key is set — drives the first-run setup nudge. */
+    isConfigured: boolean;
     // TopBar doesn't render on home, so the shelf carries its own quiet controls.
     theme: Theme;
     onToggleTheme: () => void;
@@ -32,6 +35,7 @@
     onNewPlan,
     onNewIdea,
     onToggleActive,
+    isConfigured,
     theme,
     onToggleTheme,
     onOpenSettings,
@@ -62,6 +66,7 @@
   // shelf body for ranked results.
   let searchQuery = $state("");
   let searchResults = $state<SearchHit[]>([]);
+  let searchFailed = $state(false);
   let searchSeq = 0;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   const searching = $derived(searchQuery.trim().length > 0);
@@ -71,15 +76,23 @@
     clearTimeout(searchTimer);
     if (!q) {
       searchResults = [];
+      searchFailed = false;
       return;
     }
     const seq = ++searchSeq;
     searchTimer = setTimeout(async () => {
       try {
         const hits = await api.searchDocuments(q);
-        if (seq === searchSeq) searchResults = hits;
+        if (seq === searchSeq) {
+          searchResults = hits;
+          searchFailed = false;
+        }
       } catch {
-        if (seq === searchSeq) searchResults = [];
+        // distinguish a real failure from a genuine no-match
+        if (seq === searchSeq) {
+          searchResults = [];
+          searchFailed = true;
+        }
       }
     }, 150);
     return () => clearTimeout(searchTimer);
@@ -195,7 +208,7 @@
     <header class="shelf-header">
       <h1 class="shelf-title">Your notebook</h1>
       <div class="shelf-controls">
-        <div class="shelf-new">
+        <div class="shelf-new" use:clickOutside={() => (newMenuOpen = false)}>
           <button class="shelf-new-btn" onclick={() => (newMenuOpen = !newMenuOpen)}>
             + New
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -203,7 +216,7 @@
             </svg>
           </button>
           {#if newMenuOpen}
-            <div class="shelf-menu" role="menu" tabindex="-1" onmouseleave={() => (newMenuOpen = false)}>
+            <div class="shelf-menu" role="menu" tabindex="-1">
               <button class="shelf-menu-item" onclick={startNewProject}>New project</button>
               <button
                 class="shelf-menu-item"
@@ -304,7 +317,7 @@
           </button>
         {/each}
         {#if searchResults.length === 0}
-          <span class="shelf-quiet">No matches</span>
+          <span class="shelf-quiet">{searchFailed ? "Search failed — try again." : "No matches"}</span>
         {/if}
       </section>
     {:else if isEmpty && !creatingProject}
@@ -313,14 +326,25 @@
           <polyline points="4 17 10 11 4 5" />
           <line x1="12" y1="19" x2="20" y2="19" />
         </svg>
-        <h2>Your notebook is empty</h2>
-        <p>Start a project, or just write.</p>
+        <h2>Welcome to Plume</h2>
+        <p>Write in markdown, then let AI reshape a finished piece into a version
+          for every platform. A <strong>project</strong> keeps a piece and its
+          versions together; the <strong>Inbox</strong> holds quick ideas you can
+          expand into drafts later.</p>
         <div class="shelf-empty-actions">
-          <button class="shelf-empty-btn" onclick={startNewProject}>Start a project</button>
-          <button class="shelf-empty-btn" onclick={onNewPlan}>Write a plan</button>
-          <button class="shelf-empty-btn" onclick={() => onNewPage(null)}>New document</button>
-          <button class="shelf-empty-btn" onclick={onNewIdea}>Capture an idea</button>
+          <button class="shelf-empty-btn" onclick={startNewProject} title="Group a piece and its platform versions">Start a project</button>
+          <button class="shelf-empty-btn" onclick={onNewPlan} title="A structured plan document">Write a plan</button>
+          <button class="shelf-empty-btn" onclick={() => onNewPage(null)} title="A blank markdown document">New document</button>
+          <button class="shelf-empty-btn" onclick={onNewIdea} title="A quick note for the Inbox">Capture an idea</button>
         </div>
+        {#if !isConfigured}
+          <button class="shelf-empty-ai" onclick={onOpenSettings}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z" />
+            </svg>
+            Set up an AI provider to unlock writing help
+          </button>
+        {/if}
       </div>
     {:else}
       <section class="shelf-projects">
@@ -331,10 +355,13 @@
               type="text"
               placeholder="Project name…"
               bind:value={newProjectName}
-              onblur={() => (creatingProject = false)}
+              onblur={() => void commitNewProject()}
               onkeydown={(e) => {
                 if (e.key === "Enter") void commitNewProject();
-                if (e.key === "Escape") creatingProject = false;
+                if (e.key === "Escape") {
+                  newProjectName = ""; // clear first so the blur commit is a no-op
+                  creatingProject = false;
+                }
               }}
               use:focusOnMount
             />

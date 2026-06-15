@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Theme } from "$lib/editor/themes";
   import type { ExportTarget } from "$lib/api";
+  import { clickOutside } from "$lib/clickOutside";
 
   interface Props {
     documentName: string;
@@ -91,29 +92,26 @@
     {#if exportStatus}
       <span class="topbar-export-status">{exportStatus}</span>
     {/if}
-    <button class="topbar-theme-btn" onclick={onMultiply} title="Multiply into platform versions">
+    <button class="topbar-theme-btn topbar-labeled-btn" onclick={onMultiply} title="Multiply into platform versions">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="6" cy="6" r="3" />
         <circle cx="18" cy="6" r="3" />
         <circle cx="18" cy="18" r="3" />
         <path d="M9 6h6M18 9v6M15.5 7.5l-7 9" />
       </svg>
+      <span>Multiply</span>
     </button>
-    <div class="topbar-export">
-      <button class="topbar-theme-btn" onclick={() => (exportOpen = !exportOpen)} title="Export">
+    <div class="topbar-export" use:clickOutside={() => (exportOpen = false)}>
+      <button class="topbar-theme-btn topbar-labeled-btn" onclick={() => (exportOpen = !exportOpen)} title="Export">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="7 10 12 15 17 10" />
           <line x1="12" y1="15" x2="12" y2="3" />
         </svg>
+        <span>Export</span>
       </button>
       {#if exportOpen}
-        <div
-          class="export-menu"
-          role="menu"
-          tabindex="-1"
-          onmouseleave={() => (exportOpen = false)}
-        >
+        <div class="export-menu" role="menu" tabindex="-1">
           {#each exportTargets as target (target.id)}
             <button
               class="export-menu-item"

@@ -13,6 +13,8 @@
   // id of the snapshot whose content is expanded inline, plus its loaded text
   let expandedId = $state<string | null>(null);
   let expandedText = $state("");
+  // id whose content is currently loading (drives the View button's "…" state)
+  let loadingId = $state<string | null>(null);
 
   const CAUSE_LABELS: Record<SnapshotCause, string> = {
     "ai-edit": "AI edit",
@@ -26,13 +28,32 @@
       expandedId = null;
       return;
     }
-    expandedText = await getSnapshotContent(id);
-    expandedId = id;
+    loadingId = id;
+    try {
+      expandedText = await getSnapshotContent(id);
+      expandedId = id;
+    } finally {
+      loadingId = null;
+    }
   }
+
+  function confirmRestore(id: string) {
+    if (confirm("Restore this version? Your current text is saved to history first.")) {
+      onRestore(id);
+    }
+  }
+
+  // Re-render the relative labels on a slow tick so "just now" doesn't get stuck
+  // for minutes. `relativeTime` reads `now`, so the template tracks it.
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 60_000);
+    return () => clearInterval(t);
+  });
 
   function relativeTime(iso: string): string {
     const then = new Date(iso).getTime();
-    const secs = Math.round((Date.now() - then) / 1000);
+    const secs = Math.round((now - then) / 1000);
     if (secs < 45) return "just now";
     const mins = Math.round(secs / 60);
     if (mins < 60) return `${mins}m ago`;
@@ -64,10 +85,10 @@
             <span class="history-time">{relativeTime(snap.createdAt)}</span>
             <span class="history-words">{snap.wordCount} words</span>
             <div class="history-actions">
-              <button class="history-action" onclick={() => toggleView(snap.id)}>
-                {expandedId === snap.id ? "Hide" : "View"}
+              <button class="history-action" onclick={() => toggleView(snap.id)} disabled={loadingId === snap.id}>
+                {loadingId === snap.id ? "…" : expandedId === snap.id ? "Hide" : "View"}
               </button>
-              <button class="history-action" onclick={() => onRestore(snap.id)}>Restore</button>
+              <button class="history-action" onclick={() => confirmRestore(snap.id)}>Restore</button>
             </div>
           </div>
           {#if expandedId === snap.id}

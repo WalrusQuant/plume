@@ -176,11 +176,22 @@ pub async fn export_document(
             plain: export::x::render_plain(&content),
         }),
         "html" => {
-            let bytes = export::html::render(&content, &doc_name).into_bytes();
+            // Rendering is CPU-bound (and docx decodes/re-encodes every embedded
+            // image) — run it off the async runtime so a big export can't stall
+            // the app or starve other commands.
+            let (c, n) = (content.clone(), doc_name.clone());
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                export::html::render(&c, &n).into_bytes()
+            })
+            .await
+            .map_err(|e| Error::InvalidInput(format!("export task failed: {e}")))?;
             save_to_file(&app, &doc_name, target, bytes).await
         }
         "docx" => {
-            let bytes = export::docx::render(&content)?;
+            let c = content.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || export::docx::render(&c))
+                .await
+                .map_err(|e| Error::InvalidInput(format!("export task failed: {e}")))??;
             save_to_file(&app, &doc_name, target, bytes).await
         }
         other => Err(Error::InvalidInput(format!("unhandled export target: {other}"))),

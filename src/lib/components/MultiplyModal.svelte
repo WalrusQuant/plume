@@ -10,10 +10,13 @@
     /** Non-null once a run is underway; one entry per chosen target. */
     progress: MultiplyProgress[] | null;
     onMultiply: (targets: { type: DocType; label: string }[]) => void;
+    onCancel: () => void;
     onClose: () => void;
+    onOpenSettings: () => void;
   }
 
-  let { open, sourceName, isConfigured, progress, onMultiply, onClose }: Props = $props();
+  let { open, sourceName, isConfigured, progress, onMultiply, onCancel, onClose, onOpenSettings }: Props =
+    $props();
 
   // Default every target checked — the common case is "give me all the versions".
   let selected = $state<Set<DocType>>(new Set(MULTIPLY_TARGETS.map((t) => t.type)));
@@ -65,6 +68,9 @@
       <div class="dialog-body">
         {#if !isConfigured}
           <p class="multiply-hint">Add an AI API key in Settings to multiply documents.</p>
+          <button class="dialog-btn dialog-btn--primary" onclick={onOpenSettings}>
+            Open Settings
+          </button>
         {:else if progress}
           <p class="multiply-hint">Generating platform-native versions — one at a time.</p>
           <ul class="multiply-progress">
@@ -111,9 +117,12 @@
 
       <div class="dialog-footer">
         {#if progress}
-          <button class="dialog-btn dialog-btn--primary" onclick={close} disabled={!canClose}>
-            {running ? "Generating…" : "Done"}
-          </button>
+          {#if running}
+            <button class="dialog-btn dialog-btn--secondary" onclick={onCancel}>Cancel</button>
+            <button class="dialog-btn dialog-btn--primary" disabled>Generating…</button>
+          {:else}
+            <button class="dialog-btn dialog-btn--primary" onclick={close}>Done</button>
+          {/if}
         {:else}
           <button class="dialog-btn dialog-btn--secondary" onclick={close}>Cancel</button>
           <button
