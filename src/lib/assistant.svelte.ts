@@ -154,7 +154,16 @@ class AssistantStore {
   hasTavilyKey = $state(false);
   /** Transient tool-activity line shown during a turn (e.g. "Searching…"). */
   searchStatus = $state<string | null>(null);
+  /** True when the last send dropped older turns to fit the OpenRouter cap
+      (which, unlike Anthropic, has no server-side compaction). */
+  historyTrimmed = $state(false);
   settings = $state<AISettings>(loadSettings());
+
+  /** The context limit the UI should warn against, or null when there's no
+      hard one (Anthropic relies on server-side compaction). */
+  get contextLimit(): number | null {
+    return this.settings.provider === "openrouter" ? OPENROUTER_HISTORY_BUDGET : null;
+  }
 
   private docId: string | null = null;
   /** Id of the in-flight stream; events with any other id are stale. */
@@ -354,15 +363,18 @@ class AssistantStore {
     this.isStreaming = true;
     this.streamErrored = false;
     this.activeStreamId = crypto.randomUUID();
+    // cap the sent history so a long thread can't blow up cost / overflow.
+    // Anthropic relies on server-side compaction (high backstop); OpenRouter
+    // has no compaction, so its cap is the real limiter — flag when it bites.
+    const snapshot = $state.snapshot(this.messages);
+    const capped = capHistory(snapshot, this.historyBudget());
+    this.historyTrimmed = this.settings.provider === "openrouter" && capped.length < snapshot.length;
     try {
       await api.sendAssistantMessage(
         this.activeStreamId,
         this.settings.provider,
         this.settings.model || null,
-        // cap the sent history so a long thread can't blow up cost / overflow.
-        // Anthropic relies on server-side compaction (high backstop); OpenRouter
-        // has no compaction, so its cap is the real limiter.
-        toApiMessages(capHistory($state.snapshot(this.messages), this.historyBudget())),
+        toApiMessages(capped),
         documentContent,
         references,
         this.settings.webSearch,

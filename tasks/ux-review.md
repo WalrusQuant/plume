@@ -105,88 +105,94 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done
 
 ## 🟡 MEDIUM — rough edges & misleading feedback
 
-- [ ] **M1. Raw provider/library error strings shown verbatim.** 401/429/529, disk-full,
+> **All 15 fixed 2026-06-15.** `pnpm check` 0/0, `cargo test` 95/95. Notes:
+> M1 maps the AI-API status codes (401/403/429/5xx); raw sqlite/io strings are
+> still passed through. M10 adds save-confirmation feedback but not deep model/key
+> validation (avoids false rejects). Live `pnpm tauri dev` pass wanted for the
+> visual bits (theme-flash M8, sticky footer M15, menu dismissal M4).
+
+- [x] **M1. Raw provider/library error strings shown verbatim.** 401/429/529, disk-full,
   rusqlite/io errors all surface as cryptic opaque toasts (`ai.rs:654-665`,
   `error.rs:7-12`, `docx.rs:100`, `+page.svelte:107,194`). Expired keys mid-session
   give no "re-enter your key" guidance.
   → Map common status codes / error variants to actionable messages.
 
-- [ ] **M2. False "copied" confirmations.** `copyMessage` (`AssistantPanel.svelte:145-149`)
+- [x] **M2. False "copied" confirmations.** `copyMessage` (`AssistantPanel.svelte:145-149`)
   is fire-and-forget `void navigator.clipboard.writeText` with no `.catch` — shows
   the checkmark even on failure. Clipboard exports (`+page.svelte:179-189`) show
   "Export failed" when the render succeeded and only the OS clipboard handoff failed.
   → Await the assistant copy, flip checkmark only on success; distinguish render-ok from clipboard-fail.
 
-- [ ] **M3. Export errors bypass the toast convention.** Failures flash in a 5-second
+- [x] **M3. Export errors bypass the toast convention.** Failures flash in a 5-second
   inline status span and vanish (`+page.svelte:193-201`, `showExportStatus`),
   inconsistent with every other failure surface. CLAUDE.md says failures use `toast.error`.
   → Route export failures through `toast.error`; keep inline status for success only.
 
-- [ ] **M4. Menus dismiss only on `mouseleave`.** Shelf "+ New" (`HomeShelf.svelte:206`)
+- [x] **M4. Menus dismiss only on `mouseleave`.** Shelf "+ New" (`HomeShelf.svelte:206`)
   and TopBar export (`TopBar.svelte:115`) — no outside-click or Escape. Tap/trackpad
   users get stuck menus overlapping content.
   → Close on outside pointerdown + Escape, not mouseleave.
 
-- [ ] **M5. Inline new-project name silently discarded on blur.** `HomeShelf.svelte:329-340`
+- [x] **M5. Inline new-project name silently discarded on blur.** `HomeShelf.svelte:329-340`
   sets `creatingProject = false` on blur without committing; type a name then click
   the target to confirm → name lost. Same shape in Sidebar folder rename.
   → Commit on blur if non-empty (as `commitFolderRename` does).
 
-- [ ] **M6. Restore: no confirmation, no "done" feedback.** `HistoryPanel.svelte:70` →
+- [x] **M6. Restore: no confirmation, no "done" feedback.** `HistoryPanel.svelte:70` →
   `+page.svelte:227-237` full-doc swap under the user. It *does* take a safety snapshot
   (good) but says nothing about it. Also "View" (`HistoryPanel.svelte:24-31`) awaits
   `getSnapshotContent` with no spinner.
   → Toast/confirm restore noting the auto-saved pre-restore version; add a View loading state.
 
-- [ ] **M7. No UI to remove a saved API key.** `delete_api_key`/`delete_tavily_key`
+- [x] **M7. No UI to remove a saved API key.** `delete_api_key`/`delete_tavily_key`
   (`ai.rs:240-254`) and `removeKey`/`removeTavilyKey` (`assistant.svelte.ts:416-429`)
   exist but nothing in `src/lib/components` calls them. Can't rotate to no-key without
   hand-editing the keychain / `dev-keys.json`.
   → Add a "Remove key" action in SettingsDialog.
 
-- [ ] **M8. Light-mode theme flash on launch.** Theme read in `onMount` and applied
+- [x] **M8. Light-mode theme flash on launch.** Theme read in `onMount` and applied
   after mount (`+page.svelte:561-563`); default `:root` is dark (`app.css:10-77`).
   Light users get a dark flash every launch.
   → Apply stored theme inline in `app.html` before first paint.
 
-- [ ] **M9. Empty document exports as a blank file with a success message.**
+- [x] **M9. Empty document exports as a blank file with a success message.**
   `linkedin::render`→`""`, `x` empty packing, `docx` valid-but-blank; no empty guard
   in `export_document` (`commands.rs:156-188`). "Copied — ready to paste" with nothing
   on the clipboard.
   → Detect empty rendered output, warn "Nothing to export."
 
-- [ ] **M10. Settings: no save confirmation, no validation.** `SettingsDialog.svelte:55-90`
+- [x] **M10. Settings: no save confirmation, no validation.** `SettingsDialog.svelte:55-90`
   just closes on success — no "Saved" feedback. Model field (`:136-144`) and keys are
   free-text with zero validation; a typo'd model saves and fails later as a cryptic
   mid-stream API error.
   → Confirm-on-save feedback; optionally validate the key with a test call.
 
-- [ ] **M11. Idea capture friction & silent empty-discard.** `IdeaCaptureModal.svelte`:
+- [x] **M11. Idea capture friction & silent empty-discard.** `IdeaCaptureModal.svelte`:
   overlay/Escape discards typed text with no guard (`:54`); save is fire-and-forget so
   the modal closes before the save resolves (`:38-54` + `+page.svelte:630`); empty
   idea (`+page.svelte:351`) silently saves nothing with no feedback. Cmd+Enter save
   hint is undocumented.
   → Await save before closing; guard dirty dismiss; toast on empty discard; show the save hint.
 
-- [ ] **M12. Token/context limits surfaced poorly.** OpenRouter `OPENROUTER_HISTORY_BUDGET`
+- [x] **M12. Token/context limits surfaced poorly.** OpenRouter `OPENROUTER_HISTORY_BUDGET`
   (120k hard cap) silently drops oldest turns with no UI signal; Anthropic context
   overflow → raw toast. No "approaching limit" warning (`AssistantPanel.svelte:79-88`,
   `assistant.svelte.ts:13-20`).
   → Warn when nearing the budget; tell the user when history was trimmed.
 
-- [ ] **M13. Multiply partial-failure double-reports & can't be stopped mid-batch.**
+- [x] **M13. Multiply partial-failure double-reports & can't be stopped mid-batch.**
   One failure doesn't abort the batch (good) but fires a per-target `toast.error` on
   top of the modal's own error row (`+page.svelte:447-465`, `MultiplyModal.svelte:113-116`);
   total-outage = watch 4 spinners fail with 4 toasts, no cancel (ties to H2).
   → De-dupe error reporting; stop the batch early on repeated hard failures.
 
-- [ ] **M14. Inline edit cancelled by a programmatic doc edit with no feedback.**
+- [x] **M14. Inline edit cancelled by a programmatic doc edit with no feedback.**
   History→Restore or chat Insert/Replace during an inline-edit stream resets `ieField`
   to IDLE and aborts with no toast (`inlineEdit.svelte.ts:56-63,413-419`) — preview
   widget just vanishes mid-generation.
   → Toast "Inline edit cancelled — document changed."
 
-- [ ] **M15. Settings dialog footer can scroll below the fold; Save outside the form.**
+- [x] **M15. Settings dialog footer can scroll below the fold; Save outside the form.**
   `.dialog` is `max-height:85vh; overflow-y:auto` (`app.css:1728-1729`); the long
   settings body pushes the non-sticky footer Save out of view on short windows
   (`SettingsDialog.svelte:116-213`).

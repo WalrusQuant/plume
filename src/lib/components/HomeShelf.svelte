@@ -3,6 +3,7 @@
   import type { Theme } from "$lib/editor/themes";
   import { buildSidebarTree, type SidebarFolder } from "$lib/buildSidebarTree";
   import { formatDate } from "$lib/formatDate";
+  import { clickOutside } from "$lib/clickOutside";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
 
   interface Props {
@@ -198,7 +199,7 @@
     <header class="shelf-header">
       <h1 class="shelf-title">Your notebook</h1>
       <div class="shelf-controls">
-        <div class="shelf-new">
+        <div class="shelf-new" use:clickOutside={() => (newMenuOpen = false)}>
           <button class="shelf-new-btn" onclick={() => (newMenuOpen = !newMenuOpen)}>
             + New
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -206,7 +207,7 @@
             </svg>
           </button>
           {#if newMenuOpen}
-            <div class="shelf-menu" role="menu" tabindex="-1" onmouseleave={() => (newMenuOpen = false)}>
+            <div class="shelf-menu" role="menu" tabindex="-1">
               <button class="shelf-menu-item" onclick={startNewProject}>New project</button>
               <button
                 class="shelf-menu-item"
@@ -345,10 +346,13 @@
               type="text"
               placeholder="Project name…"
               bind:value={newProjectName}
-              onblur={() => (creatingProject = false)}
+              onblur={() => void commitNewProject()}
               onkeydown={(e) => {
                 if (e.key === "Enter") void commitNewProject();
-                if (e.key === "Escape") creatingProject = false;
+                if (e.key === "Escape") {
+                  newProjectName = ""; // clear first so the blur commit is a no-op
+                  creatingProject = false;
+                }
               }}
               use:focusOnMount
             />

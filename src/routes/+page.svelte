@@ -183,12 +183,24 @@
 
   async function exportTo(targetId: string) {
     if (!selectedDoc) return;
+    if (!content.trim()) {
+      toast.error("Nothing to export — the document is empty.");
+      return;
+    }
     await flushSave();
     // file exports render (and decode images) before the save dialog appears —
     // give immediate feedback so a slow docx doesn't look like a frozen click
     showExportStatus("Exporting…", true);
+    let result: Awaited<ReturnType<typeof api.exportDocument>>;
     try {
-      const result = await api.exportDocument(content, selectedDoc.name, targetId);
+      result = await api.exportDocument(content, selectedDoc.name, targetId);
+    } catch (e) {
+      // render/build failed — surface via toast like every other failure
+      showExportStatus("");
+      toast.error(`Export failed: ${e}`);
+      return;
+    }
+    try {
       if (result.type === "clipboard") {
         await navigator.clipboard.writeText(result.text);
         showExportStatus("Copied to clipboard — ready to paste");
@@ -206,7 +218,9 @@
         showExportStatus("Export canceled");
       }
     } catch (e) {
-      showExportStatus(`Export failed: ${e}`);
+      // the document rendered fine — only the OS clipboard handoff failed
+      showExportStatus("");
+      toast.error(`Couldn't copy to the clipboard: ${e}`);
     }
   }
 
@@ -251,6 +265,7 @@
       changes: { from: 0, to: editorView.state.doc.length, insert: restored },
     });
     await loadSnapshots();
+    toast.show("Restored — a pre-restore version was saved to history.", "info");
   }
 
   function changeRightTab(tab: RightPaneTab) {
@@ -374,7 +389,10 @@
     const explicit = title.length > 0;
     const name = explicit ? title : deriveIdeaName(body);
     if (ideaModalMode === "new") {
-      if (!explicit && !body.trim()) return; // nothing to capture
+      if (!explicit && !body.trim()) {
+        toast.show("Nothing to capture — the idea was empty.", "info");
+        return;
+      }
       const doc = await api.createDocument(name, "idea", body);
       documents = [doc, ...documents];
       if (explicit) {
@@ -500,6 +518,7 @@
     // hold the slot for the whole batch (incl. the doc-creation gaps between
     // targets) so an incidental chat/inline/expand can't abort a mid-batch stream
     aiBusy.begin("content multiply");
+    let consecutiveFailures = 0;
     try {
       for (let i = 0; i < targets.length; i++) {
         if (multiplyCanceled) break; // leave the rest pending
@@ -511,12 +530,17 @@
           const doc = await api.createDocument(`${baseName} — ${targets[i].label}`, targets[i].type, draft);
           await api.moveDocument(doc.id, targetFolder);
           multiplyProgress[i].status = "done";
-        } catch (e) {
+          consecutiveFailures = 0;
+        } catch {
           multiplyProgress[i].status = "error";
           // a user cancel rejects the same way — stay quiet and stop the batch
           if (multiplyCanceled) break;
-          toast.error(`${targets[i].label} failed: ${e instanceof Error ? e.message : e}`);
-          // one failure shouldn't abort the batch
+          // the modal's error row already reports it — don't also toast each one.
+          // repeated failures mean a systemic problem (key/network), so stop.
+          if (++consecutiveFailures >= 2) {
+            toast.error("Multiply stopped — several targets failed. Check your AI key and connection.");
+            break;
+          }
         }
       }
     } finally {
@@ -715,7 +739,7 @@
     mode={ideaModalMode}
     initialTitle={ideaModalTitle}
     initialBody={ideaModalBody}
-    onSave={(title, body) => run(saveIdea(title, body), "Save idea")}
+    onSave={(title, body) => saveIdea(title, body)}
     onClose={() => (ideaModalOpen = false)}
   />
   <SettingsDialog open={settingsOpen} onClose={() => (settingsOpen = false)} />

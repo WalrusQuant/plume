@@ -661,7 +661,17 @@ async fn error_for_status(response: reqwest::Response, provider: &str) -> Result
         .ok()
         .and_then(|v| v["error"]["message"].as_str().map(String::from))
         .unwrap_or(text);
-    Err(Error::InvalidInput(format!("{provider} API error {status}: {detail}")))
+    // Map the common, actionable cases to plain guidance; fall back to the raw
+    // provider message (with status) for everything else.
+    let message = match status.as_u16() {
+        401 | 403 => format!("Your {provider} API key was rejected — check it in Settings."),
+        429 => format!("{provider} rate limit reached — wait a moment and try again."),
+        500 | 502 | 503 | 529 => {
+            format!("{provider} is unavailable right now — try again shortly.")
+        }
+        _ => format!("{provider} API error {status}: {detail}"),
+    };
+    Err(Error::InvalidInput(message))
 }
 
 /// Token usage. Providers report counts incrementally and across web-search

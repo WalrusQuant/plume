@@ -1984,6 +1984,11 @@ button:focus-visible {
   gap: 8px;
   padding: 16px 20px;
   border-top: 1px solid var(--border);
+  /* keep the primary action visible when a long dialog body scrolls (.dialog
+     is the scroll container) */
+  position: sticky;
+  bottom: 0;
+  background: var(--sidebar-bg);
 }
 
 .dialog-btn {

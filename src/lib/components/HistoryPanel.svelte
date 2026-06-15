@@ -13,6 +13,8 @@
   // id of the snapshot whose content is expanded inline, plus its loaded text
   let expandedId = $state<string | null>(null);
   let expandedText = $state("");
+  // id whose content is currently loading (drives the View button's "…" state)
+  let loadingId = $state<string | null>(null);
 
   const CAUSE_LABELS: Record<SnapshotCause, string> = {
     "ai-edit": "AI edit",
@@ -26,8 +28,19 @@
       expandedId = null;
       return;
     }
-    expandedText = await getSnapshotContent(id);
-    expandedId = id;
+    loadingId = id;
+    try {
+      expandedText = await getSnapshotContent(id);
+      expandedId = id;
+    } finally {
+      loadingId = null;
+    }
+  }
+
+  function confirmRestore(id: string) {
+    if (confirm("Restore this version? Your current text is saved to history first.")) {
+      onRestore(id);
+    }
   }
 
   function relativeTime(iso: string): string {
@@ -64,10 +77,10 @@
             <span class="history-time">{relativeTime(snap.createdAt)}</span>
             <span class="history-words">{snap.wordCount} words</span>
             <div class="history-actions">
-              <button class="history-action" onclick={() => toggleView(snap.id)}>
-                {expandedId === snap.id ? "Hide" : "View"}
+              <button class="history-action" onclick={() => toggleView(snap.id)} disabled={loadingId === snap.id}>
+                {loadingId === snap.id ? "…" : expandedId === snap.id ? "Hide" : "View"}
               </button>
-              <button class="history-action" onclick={() => onRestore(snap.id)}>Restore</button>
+              <button class="history-action" onclick={() => confirmRestore(snap.id)}>Restore</button>
             </div>
           </div>
           {#if expandedId === snap.id}

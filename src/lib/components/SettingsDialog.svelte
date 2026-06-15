@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type AIProvider } from "$lib/api";
   import { assistant, DEFAULT_MODELS } from "$lib/assistant.svelte";
+  import { toast } from "$lib/toast.svelte";
 
   interface Props {
     open: boolean;
@@ -83,7 +84,35 @@
       }
       keyInput = "";
       tavilyKeyInput = "";
+      toast.show("Settings saved", "info");
       onClose();
+    } catch (err) {
+      keyError = String(err);
+    }
+  }
+
+  /** Remove the stored key for the provider currently shown in the form. */
+  async function removeKey() {
+    try {
+      if (formProvider === assistant.settings.provider) {
+        await assistant.removeKey();
+      } else {
+        await api.deleteApiKey(formProvider);
+      }
+      hasSavedKey = false;
+      keyInput = "";
+      toast.show("API key removed", "info");
+    } catch (err) {
+      keyError = String(err);
+    }
+  }
+
+  async function removeTavilyKey() {
+    try {
+      await assistant.removeTavilyKey();
+      hasSavedTavilyKey = false;
+      tavilyKeyInput = "";
+      toast.show("Tavily key removed", "info");
     } catch (err) {
       keyError = String(err);
     }
@@ -177,6 +206,9 @@
           {hasSavedKey
             ? "✓ A key is saved for this provider. Fill this in only to replace it."
             : "No key saved for this provider yet."}
+          {#if hasSavedKey}
+            <button type="button" class="key-remove-btn" onclick={removeKey}>Remove</button>
+          {/if}
         </p>
         {#if keyError}
           <p class="assistant-key-error">{keyError}</p>
@@ -200,6 +232,9 @@
           {hasSavedTavilyKey
             ? "✓ A Tavily key is saved. Fill this in only to replace it."
             : "No Tavily key saved. Add one to let the assistant search the web."}
+          {#if hasSavedTavilyKey}
+            <button type="button" class="key-remove-btn" onclick={removeTavilyKey}>Remove</button>
+          {/if}
         </p>
         <p class="assistant-key-note">
           The assistant searches the web with Tavily when you toggle search on in the chat.
@@ -214,3 +249,16 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .key-remove-btn {
+    margin-left: 6px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--error, #e5484d);
+    font-size: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+</style>

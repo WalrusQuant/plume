@@ -88,6 +88,11 @@
     return 0;
   });
 
+  /** Within 85% of a hard context limit (OpenRouter) — warn before turns drop. */
+  const nearLimit = $derived(
+    assistant.contextLimit != null && contextTokens > 0.85 * assistant.contextLimit,
+  );
+
   $effect(() => {
     void assistant.messages.length;
     void assistant.messages[assistant.messages.length - 1]?.content;
@@ -149,8 +154,13 @@
     return block.length > 300 && /^#\s/m.test(block);
   }
 
-  function copyMessage(content: string, idx: number) {
-    void navigator.clipboard.writeText(content);
+  async function copyMessage(content: string, idx: number) {
+    try {
+      await navigator.clipboard.writeText(content);
+    } catch (e) {
+      toast.error(`Couldn't copy: ${e}`); // don't flash a false "Copied!"
+      return;
+    }
     copiedIdx = idx;
     setTimeout(() => (copiedIdx = null), 2000);
   }
@@ -201,7 +211,13 @@
       </select>
       <div class="assistant-header-actions">
         {#if contextTokens > 0}
-          <span class="assistant-context" title="Context size after the last turn">
+          <span
+            class="assistant-context"
+            class:assistant-context--warn={nearLimit}
+            title={nearLimit
+              ? "Approaching the context limit — older messages will start dropping"
+              : "Context size after the last turn"}
+          >
             ~{contextTokens.toLocaleString()} tok
           </span>
         {/if}
@@ -229,6 +245,12 @@
         </button>
       </div>
     </div>
+
+    {#if assistant.historyTrimmed}
+      <div class="assistant-trim-note">
+        Older messages were dropped to fit the context limit.
+      </div>
+    {/if}
 
     <div class="assistant-messages" bind:this={messagesEl}>
       {#if assistant.messages.length === 0}
@@ -425,5 +447,15 @@
   }
   .mention-chip-remove:hover {
     color: var(--text-primary);
+  }
+  .assistant-context--warn {
+    color: var(--error, #e5484d);
+  }
+  .assistant-trim-note {
+    padding: 6px 12px;
+    font-size: 11.5px;
+    color: var(--text-tertiary);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
   }
 </style>

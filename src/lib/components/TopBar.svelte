@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Theme } from "$lib/editor/themes";
   import type { ExportTarget } from "$lib/api";
+  import { clickOutside } from "$lib/clickOutside";
 
   interface Props {
     documentName: string;
@@ -99,7 +100,7 @@
         <path d="M9 6h6M18 9v6M15.5 7.5l-7 9" />
       </svg>
     </button>
-    <div class="topbar-export">
+    <div class="topbar-export" use:clickOutside={() => (exportOpen = false)}>
       <button class="topbar-theme-btn" onclick={() => (exportOpen = !exportOpen)} title="Export">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -108,12 +109,7 @@
         </svg>
       </button>
       {#if exportOpen}
-        <div
-          class="export-menu"
-          role="menu"
-          tabindex="-1"
-          onmouseleave={() => (exportOpen = false)}
-        >
+        <div class="export-menu" role="menu" tabindex="-1">
           {#each exportTargets as target (target.id)}
             <button
               class="export-menu-item"

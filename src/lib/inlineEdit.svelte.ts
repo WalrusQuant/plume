@@ -434,6 +434,7 @@ class InlineEditController {
     if (this.activeStreamId) {
       this.activeStreamId = null;
       void api.stopAssistant();
+      toast.error("Inline edit canceled — the document changed.");
     }
     this.streamed = "";
   }
