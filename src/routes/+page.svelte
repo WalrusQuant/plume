@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import type { EditorView } from "@codemirror/view";
   import { api, type DocType, type Document, type Folder } from "$lib/api";
   import { getTemplate } from "$lib/templates";
@@ -24,6 +25,7 @@
   import { inlineEdit } from "$lib/inlineEdit.svelte";
   import { ideaExpand } from "$lib/ideaExpand.svelte";
   import { multiply } from "$lib/multiply.svelte";
+  import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
   import type { SnapshotMeta } from "$lib/api";
 
@@ -163,17 +165,28 @@
     wordCount = countWords(next);
   }
 
-  function applyAssistantContent(content: string) {
-    if (!editorView) return;
+  async function applyAssistantContent(next: string) {
+    if (!editorView || !selectedDocId) return;
+    // "Replace document" clobbers the whole draft — capture a safety version
+    // first (same as snapshot Restore) so the prior text is recoverable.
+    try {
+      await api.createSnapshot(selectedDocId, content, "ai-edit");
+    } catch (e) {
+      toast.error(`Snapshot failed: ${e}`);
+    }
     // dispatch fires the editor's updateListener, so save + preview follow
     editorView.dispatch({
-      changes: { from: 0, to: editorView.state.doc.length, insert: content },
+      changes: { from: 0, to: editorView.state.doc.length, insert: next },
     });
+    refreshHistoryIfOpen();
   }
 
   async function exportTo(targetId: string) {
     if (!selectedDoc) return;
     await flushSave();
+    // file exports render (and decode images) before the save dialog appears —
+    // give immediate feedback so a slow docx doesn't look like a frozen click
+    showExportStatus("Exporting…", true);
     try {
       const result = await api.exportDocument(content, selectedDoc.name, targetId);
       if (result.type === "clipboard") {
@@ -189,16 +202,20 @@
         showExportStatus("Copied (rich) — paste into the editor");
       } else if (result.type === "file") {
         showExportStatus(`Saved: ${result.path}`);
+      } else if (result.type === "cancelled") {
+        showExportStatus("Export canceled");
       }
     } catch (e) {
       showExportStatus(`Export failed: ${e}`);
     }
   }
 
-  function showExportStatus(message: string) {
+  /** Show a transient export status. `sticky` keeps it until the next call
+      (used for the "Exporting…" in-progress message, replaced by the result). */
+  function showExportStatus(message: string, sticky = false) {
     exportStatus = message;
     if (exportStatusTimer) clearTimeout(exportStatusTimer);
-    exportStatusTimer = setTimeout(() => (exportStatus = ""), 5000);
+    exportStatusTimer = sticky ? null : setTimeout(() => (exportStatus = ""), 5000);
   }
 
   function insertAssistantContent(content: string) {
@@ -243,11 +260,19 @@
 
   // ----- document/folder actions -----
 
+  /** Bumped whenever the open document changes (select / home / delete), so a
+      slower in-flight content fetch can detect it was superseded and bail —
+      mirrors the assistant store's loadSeq guard. */
+  let docLoadSeq = 0;
+
   async function selectDocument(id: string) {
     if (id === selectedDocId) return;
     await flushSave();
+    const seq = ++docLoadSeq;
     editorView = null;
-    content = await api.getDocumentContent(id);
+    const loaded = await api.getDocumentContent(id);
+    if (seq !== docLoadSeq) return; // a newer switch (or home/delete) superseded this
+    content = loaded;
     selectedDocId = id;
     schedulePreview(content);
     wordCount = countWords(content);
@@ -285,6 +310,7 @@
   /** Back to the shelf: no document open. */
   async function goHome() {
     await flushSave();
+    docLoadSeq++; // cancel any in-flight document load
     editorView = null;
     selectedDocId = null;
     void assistant.loadFor(null);
@@ -380,6 +406,10 @@
   /** Expand an idea into a full draft of `type`, then open the draft. The idea
       itself is kept in the Inbox. */
   async function expandIdea(ideaId: string, type: DocType, label: string) {
+    if (aiBusy.busy) {
+      toast.error(`Wait for the ${aiBusy.label} to finish first.`);
+      return;
+    }
     const idea = documents.find((d) => d.id === ideaId);
     const ideaText = await api.getDocumentContent(ideaId);
     if (!ideaText.trim()) {
@@ -388,15 +418,24 @@
     }
     expandingId = ideaId;
     expandingLabel = label;
+    aiBusy.begin("idea expansion"); // block other AI actions from stealing the slot
     try {
       const draft = await ideaExpand.expand(ideaText, label);
       const name = idea?.titleExplicit ? `${idea.name} — ${label}` : `${label} draft`;
       await createDocument(name, type, draft);
       toast.show(`Draft created: ${name}`, "info");
+    } catch (e) {
+      if (!ideaExpand.canceled) throw e; // a cancel is intentional — stay quiet
     } finally {
+      aiBusy.end();
       expandingId = null;
       expandingLabel = "";
     }
+  }
+
+  /** Cancel a running idea expansion (the Inbox spinner's cancel button). */
+  function cancelExpand() {
+    ideaExpand.cancel();
   }
 
   // ----- content multiplication -----
@@ -410,10 +449,20 @@
   let multiplyOpen = $state(false);
   /** Non-null while/after a multiply run; one entry per chosen target. */
   let multiplyProgress = $state<MultiplyProgress[] | null>(null);
+  /** Set when the user cancels a run, so the batch loop stops after the current
+      target instead of pressing on to the remaining ones. */
+  let multiplyCanceled = false;
 
   function openMultiply() {
     multiplyProgress = null;
+    multiplyCanceled = false;
     multiplyOpen = true;
+  }
+
+  /** Cancel a running multiply: stop the active stream and let the loop unwind. */
+  function cancelMultiply() {
+    multiplyCanceled = true;
+    multiply.cancel();
   }
 
   function closeMultiply() {
@@ -424,6 +473,10 @@
   async function multiplyDocument(targets: MultiplyTarget[]) {
     const source = selectedDoc;
     if (!source) return;
+    if (aiBusy.busy) {
+      toast.error(`Wait for the ${aiBusy.label} to finish first.`);
+      return;
+    }
     await flushSave(); // multiply the saved source, not stale editor text
     const sourceText = content;
     const baseName = source.name;
@@ -444,20 +497,30 @@
 
     multiplyProgress = targets.map((t) => ({ ...t, status: "pending" }));
 
-    for (let i = 0; i < targets.length; i++) {
-      multiplyProgress[i].status = "running";
-      try {
-        // awaited → strictly sequential, honoring the single AiState slot
-        const draft = await multiply.generate(sourceText, targets[i].type, targets[i].label);
-        const targetFolder = await ensureFolder();
-        const doc = await api.createDocument(`${baseName} — ${targets[i].label}`, targets[i].type, draft);
-        await api.moveDocument(doc.id, targetFolder);
-        multiplyProgress[i].status = "done";
-      } catch (e) {
-        multiplyProgress[i].status = "error";
-        toast.error(`${targets[i].label} failed: ${e instanceof Error ? e.message : e}`);
-        // one failure shouldn't abort the batch
+    // hold the slot for the whole batch (incl. the doc-creation gaps between
+    // targets) so an incidental chat/inline/expand can't abort a mid-batch stream
+    aiBusy.begin("content multiply");
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        if (multiplyCanceled) break; // leave the rest pending
+        multiplyProgress[i].status = "running";
+        try {
+          // awaited → strictly sequential, honoring the single AiState slot
+          const draft = await multiply.generate(sourceText, targets[i].type, targets[i].label);
+          const targetFolder = await ensureFolder();
+          const doc = await api.createDocument(`${baseName} — ${targets[i].label}`, targets[i].type, draft);
+          await api.moveDocument(doc.id, targetFolder);
+          multiplyProgress[i].status = "done";
+        } catch (e) {
+          multiplyProgress[i].status = "error";
+          // a user cancel rejects the same way — stay quiet and stop the batch
+          if (multiplyCanceled) break;
+          toast.error(`${targets[i].label} failed: ${e instanceof Error ? e.message : e}`);
+          // one failure shouldn't abort the batch
+        }
       }
+    } finally {
+      aiBusy.end();
     }
 
     // One refresh so the sidebar reflects the new folder, moved source, and variants.
@@ -519,6 +582,7 @@
     if (ideaModalId === id) ideaModalOpen = false;
     if (selectedDocId === id) {
       // land on the home shelf rather than yanking another doc open
+      docLoadSeq++; // cancel any in-flight document load
       selectedDocId = null;
       editorView = null;
       void assistant.loadFor(null);
@@ -580,10 +644,33 @@
       loading = false;
     })();
 
+    // beforeunload is a backstop (webview reloads); it can't await, so the real
+    // quit-safety is the Tauri close hook below.
     const flush = () => void flushSave();
     window.addEventListener("beforeunload", flush);
+
+    // Cmd+Q / native close don't reliably fire beforeunload and tear the webview
+    // down before an async save resolves — intercept the close, await the flush,
+    // then destroy the window (destroy skips the close-requested cycle).
+    let closeUnlisten: (() => void) | null = null;
+    let closing = false;
+    const appWindow = getCurrentWindow();
+    void appWindow
+      .onCloseRequested(async (event) => {
+        if (closing) return;
+        closing = true;
+        event.preventDefault();
+        try {
+          await flushSave();
+        } finally {
+          await appWindow.destroy();
+        }
+      })
+      .then((un) => (closeUnlisten = un));
+
     return () => {
       window.removeEventListener("beforeunload", flush);
+      closeUnlisten?.();
       void flushSave();
       assistant.destroy();
       inlineEdit.destroy();
@@ -606,6 +693,7 @@
     onNewIdea={newIdea}
     onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
     onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
+    onCancelExpand={cancelExpand}
     onConvertIdea={(id, type) => run(convertIdea(id, type), "Convert idea")}
     onRename={(id, name) => run(renameDocument(id, name), "Rename")}
     onDelete={(id) => run(deleteDocument(id), "Delete")}
@@ -637,7 +725,9 @@
     isConfigured={assistant.isConfigured}
     progress={multiplyProgress}
     onMultiply={(targets) => run(multiplyDocument(targets), "Multiply")}
+    onCancel={cancelMultiply}
     onClose={closeMultiply}
+    onOpenSettings={() => (settingsOpen = true)}
   />
   <Toasts />
   <div class="main-content">
@@ -724,6 +814,7 @@
         onNewPlan={() => openNewDocument("plan")}
         onNewIdea={newIdea}
         onToggleActive={(id, active) => run(toggleFolderActive(id, active), "Update project")}
+        isConfigured={assistant.isConfigured}
         {theme}
         onToggleTheme={() => applyTheme(theme === "dark" ? "light" : "dark")}
         onOpenSettings={() => (settingsOpen = true)}

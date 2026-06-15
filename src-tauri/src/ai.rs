@@ -685,6 +685,18 @@ impl Usage {
     }
 }
 
+/// Shared HTTP client. A connect timeout and an idle *read* timeout mean a hung
+/// connection (socket open but no bytes arriving) fails instead of spinning a
+/// spinner forever. The read timeout is per-read, not a total cap, so a long
+/// generation still streams as long as tokens keep arriving.
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .build()
+        .expect("reqwest client builds with valid timeouts")
+}
+
 /// Send a request and run `on_event` for each decoded SSE `data:` payload (JSON
 /// already parsed; `[DONE]` and unparseable lines skipped). The low-level loop
 /// shared by both providers' per-round streaming.
@@ -876,7 +888,7 @@ async fn stream_anthropic(
         let allow_tools = web_search && searches < MAX_SEARCH_ROUNDS;
         let body =
             anthropic_request_body(model, &convo, system, cache_system, compact, allow_tools);
-        let mut request = reqwest::Client::new()
+        let mut request = http_client()
             .post(ANTHROPIC_URL)
             .header("x-api-key", api_key)
             .header("anthropic-version", ANTHROPIC_VERSION)
@@ -1070,7 +1082,7 @@ async fn stream_openrouter(
     let mut convo: Vec<serde_json::Value> = vec![json!({ "role": "system", "content": system })];
     convo.extend(messages.iter().map(|m| json!({ "role": m.role, "content": m.content })));
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let mut usage = Usage::default();
     let mut searches = 0;
 

@@ -17,6 +17,7 @@ import {
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "$lib/api";
 import { assistant } from "$lib/assistant.svelte";
+import { aiBusy } from "$lib/aiBusy.svelte";
 import { toast } from "$lib/toast.svelte";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,14 @@ const ACTIONS = [
   { label: "Shorten", instruction: "Make the selected text more concise without losing key meaning." },
   { label: "Expand", instruction: "Expand the selected text with more detail and supporting points." },
 ] as const;
+
+/** Strip a single code fence that wraps the entire text — a weaker model may
+    return the replacement fenced despite the prompt asking for raw text. Only
+    strips when the fence wraps everything, so genuinely fenced code survives. */
+function stripWrappingFence(s: string): string {
+  const m = s.trim().match(/^```[^\n]*\n([\s\S]*?)\n```$/);
+  return m ? m[1] : s;
+}
 
 function button(label: string, cls: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
@@ -329,6 +338,10 @@ class InlineEditController {
   runAction(view: EditorView, instruction: string) {
     const sel = view.state.selection.main;
     if (sel.empty || view.state.field(ieField).phase !== "idle") return;
+    if (aiBusy.busy) {
+      toast.error(`Wait for the ${aiBusy.label} to finish before editing.`);
+      return;
+    }
     if (!assistant.isConfigured) {
       toast.error("Add an AI API key in Settings to use inline edit.");
       return;
@@ -373,9 +386,16 @@ class InlineEditController {
   async accept(view: EditorView) {
     const ie = view.state.field(ieField);
     if (this.accepting || (ie.phase !== "review" && ie.phase !== "streaming")) return;
+    const replacement = stripWrappingFence(this.streamed);
+    // a provider can return success with an empty body; accepting that would
+    // delete the user's selection with nothing in its place — keep the original
+    if (!replacement.trim()) {
+      toast.error("The edit came back empty — your original text is unchanged.");
+      this.reject(view);
+      return;
+    }
     this.accepting = true;
     try {
-      const replacement = this.streamed;
       this.activeStreamId = null;
       if (this.docId) {
         try {

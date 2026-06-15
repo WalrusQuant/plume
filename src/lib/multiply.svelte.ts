@@ -105,6 +105,14 @@ class MultiplyController {
     return promise;
   }
 
+  /** Abort the in-flight generation (user pressed Cancel). Stops the backend
+      stream and rejects the pending promise so the orchestrator unwinds. */
+  cancel() {
+    if (!this.isGenerating) return;
+    void api.stopAssistant();
+    this.fail(new Error("Multiply canceled"));
+  }
+
   private finish(text: string) {
     const resolve = this.resolve;
     this.cleanup();

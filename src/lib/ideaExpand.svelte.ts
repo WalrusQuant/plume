@@ -30,6 +30,9 @@ interface StreamError {
 class IdeaExpandController {
   /** True while a draft is being generated — drives the Inbox spinner. */
   isExpanding = $state(false);
+  /** True when the last run ended because the user canceled it (vs. an error),
+      so the caller can stay quiet instead of toasting a failure. */
+  canceled = false;
 
   /** Id of the in-flight expand stream; events with any other id are stale. */
   private activeStreamId: string | null = null;
@@ -80,6 +83,7 @@ class IdeaExpandController {
       return Promise.reject(new Error("Add an AI API key in Settings to expand ideas."));
     }
     this.streamed = "";
+    this.canceled = false;
     this.isExpanding = true;
     this.activeStreamId = crypto.randomUUID();
     const promise = new Promise<string>((resolve, reject) => {
@@ -99,6 +103,14 @@ class IdeaExpandController {
       )
       .catch((e) => this.fail(e instanceof Error ? e : new Error(String(e))));
     return promise;
+  }
+
+  /** Abort the in-flight expansion (user pressed Cancel on the Inbox spinner). */
+  cancel() {
+    if (!this.isExpanding) return;
+    this.canceled = true;
+    void api.stopAssistant();
+    this.fail(new Error("Expansion canceled"));
   }
 
   private finish(text: string) {

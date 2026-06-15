@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { assistant } from "$lib/assistant.svelte";
+  import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
   import { api, type Document, type DocReference } from "$lib/api";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
@@ -97,6 +98,12 @@
     e.preventDefault();
     const text = input.trim();
     if (!text || assistant.isStreaming) return;
+    // a headless generation owns the single AI slot; sending now would abort it
+    // and discard its draft — block before consuming the input so it isn't lost
+    if (aiBusy.busy) {
+      toast.error(`Wait for the ${aiBusy.label} to finish before sending.`);
+      return;
+    }
     // consume the input synchronously — a second Enter during the awaited
     // reference fetch must be a no-op, not a silently dropped message
     const pendingMentions = mentions;

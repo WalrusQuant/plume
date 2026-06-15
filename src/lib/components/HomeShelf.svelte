@@ -16,6 +16,8 @@
     onNewPlan: () => void;
     onNewIdea: () => void;
     onToggleActive: (id: string, active: boolean) => void;
+    /** Whether an AI provider key is set — drives the first-run setup nudge. */
+    isConfigured: boolean;
     // TopBar doesn't render on home, so the shelf carries its own quiet controls.
     theme: Theme;
     onToggleTheme: () => void;
@@ -32,6 +34,7 @@
     onNewPlan,
     onNewIdea,
     onToggleActive,
+    isConfigured,
     theme,
     onToggleTheme,
     onOpenSettings,
@@ -313,14 +316,25 @@
           <polyline points="4 17 10 11 4 5" />
           <line x1="12" y1="19" x2="20" y2="19" />
         </svg>
-        <h2>Your notebook is empty</h2>
-        <p>Start a project, or just write.</p>
+        <h2>Welcome to Plume</h2>
+        <p>Write in markdown, then let AI reshape a finished piece into a version
+          for every platform. A <strong>project</strong> keeps a piece and its
+          versions together; the <strong>Inbox</strong> holds quick ideas you can
+          expand into drafts later.</p>
         <div class="shelf-empty-actions">
-          <button class="shelf-empty-btn" onclick={startNewProject}>Start a project</button>
-          <button class="shelf-empty-btn" onclick={onNewPlan}>Write a plan</button>
-          <button class="shelf-empty-btn" onclick={() => onNewPage(null)}>New document</button>
-          <button class="shelf-empty-btn" onclick={onNewIdea}>Capture an idea</button>
+          <button class="shelf-empty-btn" onclick={startNewProject} title="Group a piece and its platform versions">Start a project</button>
+          <button class="shelf-empty-btn" onclick={onNewPlan} title="A structured plan document">Write a plan</button>
+          <button class="shelf-empty-btn" onclick={() => onNewPage(null)} title="A blank markdown document">New document</button>
+          <button class="shelf-empty-btn" onclick={onNewIdea} title="A quick note for the Inbox">Capture an idea</button>
         </div>
+        {#if !isConfigured}
+          <button class="shelf-empty-ai" onclick={onOpenSettings}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z" />
+            </svg>
+            Set up an AI provider to unlock writing help
+          </button>
+        {/if}
       </div>
     {:else}
       <section class="shelf-projects">
