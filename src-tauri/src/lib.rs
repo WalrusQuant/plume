@@ -20,7 +20,15 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
-            let conn = Connection::open(data_dir.join("markdown.db"))?;
+            let db_path = data_dir.join("markdown.db");
+            // Safety net: snapshot the DB before migrations can touch it. If a
+            // future migration half-applies, the user can roll back by hand.
+            // Cheap for the small DBs this app produces; skipped on first run.
+            if db_path.exists() {
+                let bak = data_dir.join("markdown.db.bak");
+                let _ = std::fs::copy(&db_path, &bak);
+            }
+            let conn = Connection::open(&db_path)?;
             storage::init(&conn)?;
             app.manage(Db(Mutex::new(conn)));
             app.manage(ai::AiState::default());

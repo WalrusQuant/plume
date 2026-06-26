@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { confirm } from "@tauri-apps/plugin-dialog";
   import type { SnapshotMeta, SnapshotCause } from "$lib/api";
 
   interface Props {
@@ -37,8 +38,11 @@
     }
   }
 
-  function confirmRestore(id: string) {
-    if (confirm("Restore this version? Your current text is saved to history first.")) {
+  async function confirmRestore(id: string) {
+    const ok = await confirm(
+      "Restore this version? Your current text is saved to history first.",
+    );
+    if (ok) {
       onRestore(id);
     }
   }

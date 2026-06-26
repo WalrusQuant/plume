@@ -259,11 +259,14 @@ fn migrate(conn: &Connection) -> Result<()> {
     let version: usize =
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))? as usize;
     for (i, migration) in MIGRATIONS.iter().enumerate().skip(version) {
-        conn.execute_batch(&format!(
-            "BEGIN;\n{}\nPRAGMA user_version = {};\nCOMMIT;",
-            migration,
-            i + 1
-        ))?;
+        // Each migration runs in its own transaction. On error the `Transaction`
+        // guard rolls back automatically (its Drop impl issues ROLLBACK), so a
+        // half-applied migration can never leave the connection in an open
+        // transaction or advance user_version past the applied statements.
+        let tx = conn.unchecked_transaction()?;
+        tx.execute_batch(migration)?;
+        tx.execute(&format!("PRAGMA user_version = {}", i + 1), [])?;
+        tx.commit()?;
     }
     Ok(())
 }
@@ -345,7 +348,8 @@ pub fn create_document(
     let name = validated_name(name)?;
     let id = uuid::Uuid::new_v4().to_string();
     let ts = now();
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
         "INSERT INTO documents (id, name, type, folder_id, content, created_at, updated_at, sort_order)
          VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?5,
                  COALESCE((SELECT MIN(sort_order) FROM documents), 1) - 1)",
@@ -357,21 +361,24 @@ pub fn create_document(
             ts
         ],
     )?;
-    fts_index(conn, &id)?;
+    fts_index(&tx, &id)?;
+    tx.commit()?;
     get_document(conn, &id)
 }
 
 pub fn rename_document(conn: &Connection, id: &str, name: &str) -> Result<Document> {
     let name = validated_name(name)?;
     // A rename is always a deliberate act → the name becomes explicit.
-    let changed = conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
         "UPDATE documents SET name = ?2, title_explicit = 1, updated_at = ?3 WHERE id = ?1",
         rusqlite::params![id, name, now()],
     )?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
-    fts_index(conn, id)?;
+    fts_index(&tx, id)?;
+    tx.commit()?;
     get_document(conn, id)
 }
 
@@ -386,14 +393,16 @@ pub fn update_idea_name(
     explicit: bool,
 ) -> Result<Document> {
     let name = validated_name(name)?;
-    let changed = conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
         "UPDATE documents SET name = ?2, title_explicit = ?3, updated_at = ?4 WHERE id = ?1",
         rusqlite::params![id, name, explicit, now()],
     )?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
-    fts_index(conn, id)?;
+    fts_index(&tx, id)?;
+    tx.commit()?;
     get_document(conn, id)
 }
 
@@ -408,14 +417,16 @@ pub fn update_document_type(
     explicit: bool,
 ) -> Result<Document> {
     let name = validated_name(name)?;
-    let changed = conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
         "UPDATE documents SET type = ?2, name = ?3, title_explicit = ?4, updated_at = ?5 WHERE id = ?1",
         rusqlite::params![id, doc_type.as_str(), name, explicit, now()],
     )?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
-    fts_index(conn, id)?;
+    fts_index(&tx, id)?;
+    tx.commit()?;
     get_document(conn, id)
 }
 
@@ -459,11 +470,13 @@ pub fn reorder_documents(conn: &Connection, ids: &[String]) -> Result<()> {
 }
 
 pub fn delete_document(conn: &Connection, id: &str) -> Result<()> {
-    let changed = conn.execute("DELETE FROM documents WHERE id = ?1", [id])?;
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute("DELETE FROM documents WHERE id = ?1", [id])?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
-    fts_delete(conn, id)?;
+    fts_delete(&tx, id)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -476,14 +489,16 @@ pub fn get_document_content(conn: &Connection, id: &str) -> Result<String> {
 }
 
 pub fn save_document_content(conn: &Connection, id: &str, content: &str) -> Result<()> {
-    let changed = conn.execute(
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
         "UPDATE documents SET content = ?2, updated_at = ?3 WHERE id = ?1",
         rusqlite::params![id, content, now()],
     )?;
     if changed == 0 {
         return Err(Error::NotFound("document"));
     }
-    fts_index(conn, id)?;
+    fts_index(&tx, id)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -748,11 +763,14 @@ pub fn save_chat_messages(
                 .get(i)
                 .filter(|(e, _)| e.role == msg.role && e.content == msg.content)
                 .map_or(ts.as_str(), |(_, t)| t.as_str());
-            // serialize blocks to TEXT; None → SQL NULL
-            let raw_content = msg
-                .raw_content
-                .as_ref()
-                .map(|v| serde_json::to_string(v).expect("serialize raw_content"));
+            // serialize blocks to TEXT; None → SQL NULL. Propagate rather than
+            // panic — a panic here would poison the app-wide DB Mutex.
+            let raw_content = match msg.raw_content.as_ref() {
+                Some(v) => Some(
+                    serde_json::to_string(v).map_err(|e| Error::InvalidInput(e.to_string()))?,
+                ),
+                None => None,
+            };
             stmt.execute(rusqlite::params![
                 document_id,
                 chat_id,

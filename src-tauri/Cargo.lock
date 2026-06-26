@@ -2262,6 +2262,7 @@ dependencies = [
  "futures-util",
  "image",
  "keyring",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",

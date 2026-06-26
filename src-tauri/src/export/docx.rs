@@ -536,10 +536,21 @@ fn load_image_bytes(url: &str) -> Option<Vec<u8>> {
     let path = url.strip_prefix("file://").unwrap_or(url);
     // Only absolute local paths resolve — the doc has no on-disk base for
     // relative paths (it lives in SQLite).
-    if path.starts_with('/') {
-        return std::fs::read(path).ok();
+    if !path.starts_with('/') {
+        return None;
     }
-    None
+    // Guard against exfiltration of non-image files from imported/shared docs
+    // (e.g. `![](/etc/passwd)` or `![](file:///Users/.../id_rsa)`): only read
+    // paths whose extension is a known image format. `image_dims` still
+    // validates the bytes are decodable downstream.
+    let lower = path.to_ascii_lowercase();
+    const IMG_EXT: &[&str] = &[
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff", ".ico",
+    ];
+    if !IMG_EXT.iter().any(|e| lower.ends_with(e)) {
+        return None;
+    }
+    std::fs::read(path).ok()
 }
 
 /// Validate the bytes are a decodable image and return its pixel dimensions.

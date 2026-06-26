@@ -54,7 +54,7 @@ pub async fn search(
         "max_results": max_results,
         "include_answer": false,
     });
-    let response = reqwest::Client::new()
+    let response = crate::ai::http_client()
         .post(TAVILY_URL)
         .header("content-type", "application/json")
         .json(&body)

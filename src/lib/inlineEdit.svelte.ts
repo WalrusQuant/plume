@@ -338,6 +338,10 @@ class InlineEditController {
   runAction(view: EditorView, instruction: string) {
     const sel = view.state.selection.main;
     if (sel.empty || view.state.field(ieField).phase !== "idle") return;
+    if (assistant.isStreaming) {
+      toast.error("Wait for the chat reply to finish before editing.");
+      return;
+    }
     if (aiBusy.busy) {
       toast.error(`Wait for the ${aiBusy.label} to finish before editing.`);
       return;

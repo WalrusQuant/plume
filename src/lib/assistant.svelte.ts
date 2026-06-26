@@ -251,16 +251,23 @@ class AssistantStore {
       this.messages = [];
       return;
     }
-    let chats = await api.listChats(docId);
-    if (chats.length === 0) {
-      chats = [await api.createChat(docId)];
+    try {
+      let chats = await api.listChats(docId);
+      if (chats.length === 0) {
+        chats = [await api.createChat(docId)];
+      }
+      if (seq !== this.loadSeq) return;
+      const messages = await api.getChatMessages(chats[0].id);
+      if (seq !== this.loadSeq) return;
+      this.chats = chats;
+      this.activeChatId = chats[0].id;
+      this.messages = messages;
+    } catch (e) {
+      toast.error(`Couldn't load chat: ${e instanceof Error ? e.message : String(e)}`);
+      this.chats = [];
+      this.activeChatId = null;
+      this.messages = [];
     }
-    if (seq !== this.loadSeq) return;
-    const messages = await api.getChatMessages(chats[0].id);
-    if (seq !== this.loadSeq) return;
-    this.chats = chats;
-    this.activeChatId = chats[0].id;
-    this.messages = messages;
   }
 
   async selectChat(chatId: string) {

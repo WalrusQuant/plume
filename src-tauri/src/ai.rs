@@ -699,12 +699,19 @@ impl Usage {
 /// connection (socket open but no bytes arriving) fails instead of spinning a
 /// spinner forever. The read timeout is per-read, not a total cap, so a long
 /// generation still streams as long as tokens keep arriving.
-fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .build()
-        .expect("reqwest client builds with valid timeouts")
+///
+/// A process-wide `reqwest::Client` with sane timeouts. Reused across every AI
+/// stream round and the Tavily web-search path so connection pools/TLS sessions
+/// are amortized instead of rebuilt per request.
+pub(crate) fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(120))
+            .build()
+            .expect("reqwest client builds with valid timeouts")
+    })
 }
 
 /// Send a request and run `on_event` for each decoded SSE `data:` payload (JSON
