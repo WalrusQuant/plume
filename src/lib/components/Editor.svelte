@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { EditorView, basicSetup } from "codemirror";
   import { keymap } from "@codemirror/view";
+  import { indentWithTab } from "@codemirror/commands";
   import { EditorState, Compartment, Prec } from "@codemirror/state";
   import { markdown } from "@codemirror/lang-markdown";
   import { languages } from "@codemirror/language-data";
@@ -15,6 +16,7 @@
       { key: "Mod-i", run: (v) => (toggleItalic(v), true) },
       { key: "Mod-k", run: (v) => (insertLink(v), true) },
       { key: "Mod-e", run: (v) => (toggleInlineCode(v), true) },
+      indentWithTab,
     ]),
   );
 
