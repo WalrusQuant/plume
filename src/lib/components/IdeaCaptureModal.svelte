@@ -1,5 +1,6 @@
 <script lang="ts">
   import { toast } from "$lib/toast.svelte";
+  import { formatError } from "$lib/formatError";
 
   // Small capture/edit modal for ideas. Ideas are quick notes — they never open
   // in the big editor, so all capture and editing happens here. Reuses the
@@ -47,7 +48,7 @@
     try {
       await onSave(title.trim(), body); // await so a failed save keeps the text
     } catch (e) {
-      toast.error(`Save idea failed: ${e}`);
+      toast.error(`Save idea failed: ${formatError(e)}`);
       return; // leave the modal open with the user's text intact
     } finally {
       saving = false;

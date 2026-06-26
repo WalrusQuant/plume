@@ -3,6 +3,7 @@
   import { assistant } from "$lib/assistant.svelte";
   import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
+  import { formatError } from "$lib/formatError";
   import { api, type Document, type DocReference } from "$lib/api";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
 
@@ -66,7 +67,7 @@
       try {
         refs.push({ name: m.name, content: await api.getDocumentContent(m.id) });
       } catch (e) {
-        toast.error(`Couldn't attach "${m.name}": ${e}`);
+        toast.error(`Couldn't attach "${m.name}": ${formatError(e)}`);
       }
     }
     return refs;
@@ -74,7 +75,7 @@
 
   /** Fire-and-forget chat op with a visible error toast on failure. */
   function guard(promise: Promise<unknown>, what: string) {
-    promise.catch((e) => toast.error(`${what} failed: ${e}`));
+    promise.catch((e) => toast.error(`${what} failed: ${formatError(e)}`));
   }
 
   /** Context size after the last completed turn (what the model last saw). */
@@ -171,7 +172,7 @@
     try {
       await navigator.clipboard.writeText(content);
     } catch (e) {
-      toast.error(`Couldn't copy: ${e}`); // don't flash a false "Copied!"
+      toast.error(`Couldn't copy: ${formatError(e)}`); // don't flash a false "Copied!"
       return;
     }
     copiedIdx = idx;

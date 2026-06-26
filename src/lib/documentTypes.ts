@@ -64,3 +64,24 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
     description: "Operational runbook with steps and procedures",
   },
 ];
+
+// Compile-time exhaustiveness guard: every DocType must either appear in
+// DOCUMENT_TYPES or be explicitly excluded below. Adding a new DocType variant
+// without registering it here is a type error.
+const _EXHAUSTIVE: Record<DocType, true> = {
+  "blog-post": true,
+  newsletter: true,
+  "linkedin-post": true,
+  "x-thread": true,
+  skill: true,
+  "claude-md": true,
+  "system-prompt": true,
+  runbook: true,
+  plan: true,
+  "build-log": true,
+  // `idea` is intentionally excluded from DOCUMENT_TYPES — ideas are captured
+  // via the IdeaCaptureModal, never the new-doc picker.
+  idea: true,
+  generic: true,
+};
+void _EXHAUSTIVE;

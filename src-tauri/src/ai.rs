@@ -605,6 +605,12 @@ fn run_stream(
             let _ = task_app.emit(EVT_ERROR, json!({ "id": task_id, "message": e.to_string() }));
         }
         let _ = task_app.emit(EVT_DONE, json!({ "id": task_id }));
+        // Clear the slot on completion so a later `stop_stream` doesn't emit a
+        // spurious `aborted:true` for a stream that already finished naturally.
+        use tauri::Manager;
+        if let Some(state) = task_app.try_state::<AiState>() {
+            state.current.lock().expect("ai mutex poisoned").take();
+        }
     });
     *current = Some((stream_id, task));
     Ok(())
@@ -733,7 +739,10 @@ async fn stream_events(
         }
         match serde_json::from_str::<serde_json::Value>(data) {
             Ok(event) => on_event(&event),
-            Err(_) => Ok(()),
+            Err(_) => {
+                eprintln!("[ai] unparseable SSE data payload (len {}): {:.120}", data.len(), data);
+                Ok(())
+            }
         }
     })
     .await
@@ -757,25 +766,31 @@ async fn run_web_search(tavily_key: &str, query: &str) -> String {
     }
 }
 
+/// Models that support both adaptive thinking and server-side context compaction.
+/// The two capability sets currently coincide; kept as one constant so they
+/// can't drift. When a future model supports one but not the other, split into
+/// two lists. Verified 2026-06-11 against the claude-api skill.
+const STRONG_TIER_MODELS: &[&str] = &[
+    "claude-fable-5",
+    "claude-mythos-5",
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-4-6",
+];
+
 /// Whether an Anthropic model accepts `"thinking": {"type": "adaptive"}`.
 /// Adaptive thinking exists on Opus 4.6+, Sonnet 4.6, and the Fable/Mythos 5
 /// family; Haiku 4.5 (our `fast_model`) and older models 400 on it, so the
 /// thinking field is omitted entirely for them (omitting is valid everywhere).
-/// Verified 2026-06-11 against the claude-api skill.
 fn supports_adaptive_thinking(model: &str) -> bool {
-    ["claude-fable-5", "claude-mythos-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6"]
-        .iter()
-        .any(|m| model.starts_with(m))
+    STRONG_TIER_MODELS.iter().any(|m| model.starts_with(m))
 }
 
 /// Whether a model supports server-side context compaction (beta
-/// `compact-2026-01-12`). Kept separate from `supports_adaptive_thinking` even
-/// though the lists currently coincide — they are distinct capabilities.
-/// Verified 2026-06-11 against the claude-api skill.
+/// `compact-2026-01-12`).
 fn supports_compaction(model: &str) -> bool {
-    ["claude-fable-5", "claude-mythos-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-sonnet-4-6"]
-        .iter()
-        .any(|m| model.starts_with(m))
+    STRONG_TIER_MODELS.iter().any(|m| model.starts_with(m))
 }
 
 /// Render one chat message to the Anthropic wire shape. A turn that carries a
@@ -1097,7 +1112,16 @@ async fn stream_openrouter(
 ) -> Result<()> {
     let web_search = tavily_key.is_some();
     let mut convo: Vec<serde_json::Value> = vec![json!({ "role": "system", "content": system })];
-    convo.extend(messages.iter().map(|m| json!({ "role": m.role, "content": m.content })));
+    // Replay compaction content blocks verbatim when present (Anthropic compaction
+    // stores the server's summary as a JSON array of content blocks). Without
+    // this, switching a compacted thread to OpenRouter would silently discard
+    // the summary and lose context.
+    convo.extend(messages.iter().map(|m| {
+        match &m.raw_content {
+            Some(blocks) => json!({ "role": m.role, "content": blocks }),
+            None => json!({ "role": m.role, "content": m.content }),
+        }
+    }));
 
     let client = http_client();
     let mut usage = Usage::default();

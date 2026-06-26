@@ -19,6 +19,7 @@ import { api } from "$lib/api";
 import { assistant } from "$lib/assistant.svelte";
 import { aiBusy } from "$lib/aiBusy.svelte";
 import { toast } from "$lib/toast.svelte";
+import { formatError } from "$lib/formatError";
 
 // ---------------------------------------------------------------------------
 // Inline AI edit — select text → menu (Rewrite/Shorten/Expand/Custom) →
@@ -371,7 +372,7 @@ class InlineEditController {
         assistant.settings.voice || null,
       )
       .catch((e) => {
-        toast.error(`Inline edit failed: ${e}`);
+        toast.error(`Inline edit failed: ${formatError(e)}`);
         this.reject(view);
       });
   }
@@ -405,7 +406,7 @@ class InlineEditController {
         try {
           await api.createSnapshot(this.docId, this.getContent(), "ai-edit");
         } catch (e) {
-          toast.error(`Snapshot failed: ${e}`);
+          toast.error(`Snapshot failed: ${formatError(e)}`);
         }
       }
       // dispatch drives the editor's updateListener (save + preview); the doc

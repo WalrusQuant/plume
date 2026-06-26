@@ -1,6 +1,7 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api, type AIProvider, type Chat, type ChatMessage, type DocReference } from "$lib/api";
 import { toast } from "$lib/toast.svelte";
+import { formatError } from "$lib/formatError";
 
 const SETTINGS_KEY = "markdown-ai-settings";
 /** Must match storage.rs::DEFAULT_CHAT_TITLE — signals an un-titled chat. */
@@ -402,7 +403,7 @@ class AssistantStore {
       }
       return true;
     } catch (e) {
-      toast.error(`Sending message failed: ${e}`);
+      toast.error(`Sending message failed: ${formatError(e)}`);
       this.isStreaming = false;
       this.activeStreamId = null;
       // roll back the optimistic user message so it isn't persisted or merged

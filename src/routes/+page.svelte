@@ -27,6 +27,7 @@
   import { multiply } from "$lib/multiply.svelte";
   import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
+  import { formatError } from "$lib/formatError";
   import type { SnapshotMeta } from "$lib/api";
 
   const SAVE_DEBOUNCE_MS = 500;
@@ -59,7 +60,7 @@
 
   /** Fire-and-forget with a visible error toast on failure. */
   function run(promise: Promise<unknown>, what: string) {
-    promise.catch((e) => toast.error(`${what} failed: ${e}`));
+    promise.catch((e) => toast.error(`${what} failed: ${formatError(e)}`));
   }
 
   let editorView = $state<EditorView | null>(null);
@@ -106,7 +107,7 @@
         // keep it for the next keystroke/flush to retry — unless newer
         // content for this doc was scheduled while the save was in flight
         if (!pendingSaves.has(id)) pendingSaves.set(id, content);
-        toast.error(`Saving failed: ${e}`);
+        toast.error(`Saving failed: ${formatError(e)}`);
         continue;
       }
       const doc = documents.find((d) => d.id === id);
@@ -124,7 +125,7 @@
       .then((snap) => {
         if (snap && id === selectedDocId && rightTab === "history") void loadSnapshots();
       })
-      .catch((e) => toast.error(`Snapshot failed: ${e}`));
+      .catch((e) => toast.error(`Snapshot failed: ${formatError(e)}`));
   }
 
   // ----- preview (debounced render via comrak) -----
@@ -172,7 +173,7 @@
     try {
       await api.createSnapshot(selectedDocId, content, "ai-edit");
     } catch (e) {
-      toast.error(`Snapshot failed: ${e}`);
+      toast.error(`Snapshot failed: ${formatError(e)}`);
     }
     // dispatch fires the editor's updateListener, so save + preview follow
     editorView.dispatch({
@@ -197,7 +198,7 @@
     } catch (e) {
       // render/build failed — surface via toast like every other failure
       showExportStatus("");
-      toast.error(`Export failed: ${e}`);
+      toast.error(`Export failed: ${formatError(e)}`);
       return;
     }
     try {
@@ -220,7 +221,7 @@
     } catch (e) {
       // the document rendered fine — only the OS clipboard handoff failed
       showExportStatus("");
-      toast.error(`Couldn't copy to the clipboard: ${e}`);
+      toast.error(`Couldn't copy to the clipboard: ${formatError(e)}`);
     }
   }
 
@@ -257,6 +258,9 @@
 
   async function restoreSnapshot(snapshotId: string) {
     if (!selectedDocId || !editorView) return;
+    // flush any pending save first so the pre-restore snapshot captures what's
+    // actually on disk, not just in-memory text
+    await flushSave();
     // safety capture of the current text, then swap in the restored version
     await api.createSnapshot(selectedDocId, content, "restore");
     const restored = await api.getSnapshotContent(snapshotId);
@@ -673,7 +677,7 @@
         ]);
         // no auto-select: boot lands on the home shelf
       } catch (e) {
-        toast.error(`Loading documents failed: ${e}`);
+        toast.error(`Loading documents failed: ${formatError(e)}`);
       }
       loading = false;
     })();
@@ -706,6 +710,8 @@
       window.removeEventListener("beforeunload", flush);
       closeUnlisten?.();
       void flushSave();
+      if (previewTimer) clearTimeout(previewTimer);
+      if (exportStatusTimer) clearTimeout(exportStatusTimer);
       assistant.destroy();
       inlineEdit.destroy();
       ideaExpand.destroy();
