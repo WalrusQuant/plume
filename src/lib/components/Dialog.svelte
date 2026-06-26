@@ -32,29 +32,48 @@
   let panel: HTMLDivElement | null = $state(null);
   let previouslyFocused: HTMLElement | null = null;
 
-  // Focus trap: tabbing past the last focusable element wraps to the first.
+  // Focus trap: only intercept Tab when focus would escape the dialog
+  // (i.e., the active element is the first/last focusable). This lets
+  // textareas and inputs handle Tab natively — inserting a tab character or
+  // moving between fields — instead of being trapped.
   const FOCUSABLE =
     'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])';
 
   function onKeydown(e: KeyboardEvent) {
+    if (!open) return;
     if (e.key === "Escape" && dismissible) {
       e.preventDefault();
       handleOverlayClick();
       return;
     }
-    if (e.key !== "Tab" || !panel) return;
-    const nodes = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
-      (el) => el.offsetParent !== null,
-    );
+    if (e.key !== "Tab") return;
+    const active = document.activeElement;
+    // If focus is in a text-editable field that isn't at the dialog boundary,
+    // let the browser handle Tab natively (textarea tab insertion, field-to-field
+    // navigation, etc.)
+    const isEditable =
+      active instanceof HTMLTextAreaElement ||
+      active instanceof HTMLInputElement ||
+      active instanceof HTMLSelectElement;
+    const nodes = panel
+      ? Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+          (el) => el.offsetParent !== null,
+        )
+      : [];
     if (nodes.length === 0) return;
     const first = nodes[0];
     const last = nodes[nodes.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
+    const atFirst = active === first;
+    const atLast = active === last;
+    // Only intercept at the wrap points; everything else uses native Tab
+    if (e.shiftKey && atFirst) {
       e.preventDefault();
       last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
+    } else if (!e.shiftKey && atLast) {
       e.preventDefault();
       first.focus();
+    } else if (isEditable) {
+      // editable field in the middle of the dialog — let the browser handle it
     }
   }
 
