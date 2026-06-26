@@ -3,6 +3,8 @@ pub mod html;
 pub mod linkedin;
 pub mod x;
 
+use comrak::nodes::{AstNode, ListType, NodeValue};
+
 use serde::Serialize;
 
 /// One comrak parse → AST → each target renders its own output format
@@ -57,4 +59,61 @@ pub enum ExportOutput {
     ClipboardHtml { html: String, plain: String },
     File { path: String },
     Cancelled,
+}
+
+/// Shared plain-text list renderer for clipboard-text targets (LinkedIn, X).
+/// Walks a comrak list node and produces indented `"• "` / `"1. "` lines,
+/// recursing into nested sub-lists. The `inline` fn maps each item's child AST
+/// node to a text string (each target has its own styling rules).
+/// `indent_unit` is repeated per depth level (3 spaces for LinkedIn, 2 for X).
+pub(crate) fn render_plain_list<'a>(
+    list_node: &'a AstNode<'a>,
+    list_type: ListType,
+    start: usize,
+    depth: usize,
+    indent_unit: &str,
+    inline: fn(&'a AstNode<'a>) -> String,
+) -> String {
+    let indent = indent_unit.repeat(depth);
+    let cont_indent = " ".repeat(indent_unit.len() + 2); // align under marker text
+    let mut number = start;
+    let mut out = String::new();
+    for item in list_node.children() {
+        let marker = match list_type {
+            ListType::Bullet => "• ".to_string(),
+            ListType::Ordered => {
+                let m = format!("{number}. ");
+                number += 1;
+                m
+            }
+        };
+        let mut first = true;
+        for child in item.children() {
+            match &child.data.borrow().value {
+                NodeValue::List(inner) => {
+                    out.push_str(&render_plain_list(
+                        child,
+                        inner.list_type,
+                        inner.start,
+                        depth + 1,
+                        indent_unit,
+                        inline,
+                    ));
+                    out.push('\n');
+                }
+                _ => {
+                    let prefix = if first {
+                        format!("{indent}{marker}")
+                    } else {
+                        format!("{indent}{cont_indent}")
+                    };
+                    out.push_str(&prefix);
+                    out.push_str(&inline(child));
+                    out.push('\n');
+                    first = false;
+                }
+            }
+        }
+    }
+    out.trim_end().to_string()
 }

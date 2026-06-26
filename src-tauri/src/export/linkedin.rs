@@ -2,7 +2,7 @@
 //! characters (Mathematical Sans-Serif Bold/Italic), bullets, and plain text.
 //! Links are flattened to "text (url)".
 
-use comrak::nodes::{AstNode, ListType, NodeValue};
+use comrak::nodes::{AstNode, NodeValue};
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Style {
@@ -35,7 +35,15 @@ fn render_blocks<'a>(node: &'a AstNode<'a>, out: &mut String, depth: usize) {
                 out.push_str("\n\n");
             }
             NodeValue::List(list) => {
-                render_list(child, list.list_type, list.start, out, depth);
+                let text = super::render_plain_list(
+                    child,
+                    list.list_type,
+                    list.start,
+                    depth,
+                    "   ",
+                    inline_default,
+                );
+                out.push_str(&text);
                 out.push('\n');
             }
             NodeValue::CodeBlock(cb) => {
@@ -55,38 +63,8 @@ fn render_blocks<'a>(node: &'a AstNode<'a>, out: &mut String, depth: usize) {
     }
 }
 
-fn render_list<'a>(
-    list_node: &'a AstNode<'a>,
-    list_type: ListType,
-    start: usize,
-    out: &mut String,
-    depth: usize,
-) {
-    let indent = "   ".repeat(depth);
-    let mut number = start;
-    for item in list_node.children() {
-        let marker = match list_type {
-            ListType::Bullet => "• ".to_string(),
-            ListType::Ordered => {
-                let m = format!("{number}. ");
-                number += 1;
-                m
-            }
-        };
-        for (i, child) in item.children().enumerate() {
-            match &child.data.borrow().value {
-                NodeValue::List(inner) => {
-                    render_list(child, inner.list_type, inner.start, out, depth + 1);
-                }
-                _ => {
-                    let prefix = if i == 0 { format!("{indent}{marker}") } else { format!("{indent}   ") };
-                    out.push_str(&prefix);
-                    out.push_str(&inline_text(child, Style::default()));
-                    out.push('\n');
-                }
-            }
-        }
-    }
+fn inline_default<'a>(node: &'a AstNode<'a>) -> String {
+    inline_text(node, Style::default())
 }
 
 fn inline_text<'a>(node: &'a AstNode<'a>, style: Style) -> String {

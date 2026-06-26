@@ -246,7 +246,14 @@ fn walk<'a>(node: &'a AstNode<'a>, blocks: &mut Vec<Block>) {
                 }
             }
             NodeValue::List(list) => {
-                let text = render_list(child, list.list_type, list.start, 0);
+                let text = super::render_plain_list(
+                    child,
+                    list.list_type,
+                    list.start,
+                    0,
+                    "  ",
+                    inline_text,
+                );
                 if !text.trim().is_empty() {
                     blocks.push(Block { text, split: Split::Lines });
                 }
@@ -262,48 +269,6 @@ fn walk<'a>(node: &'a AstNode<'a>, blocks: &mut Vec<Block>) {
             _ => walk(child, blocks),
         }
     }
-}
-
-fn render_list<'a>(
-    list_node: &'a AstNode<'a>,
-    list_type: ListType,
-    start: usize,
-    depth: usize,
-) -> String {
-    let indent = "  ".repeat(depth);
-    let mut number = start;
-    let mut out = String::new();
-    for item in list_node.children() {
-        let marker = match list_type {
-            ListType::Bullet => "• ".to_string(),
-            ListType::Ordered => {
-                let m = format!("{number}. ");
-                number += 1;
-                m
-            }
-        };
-        let mut first = true;
-        for child in item.children() {
-            match &child.data.borrow().value {
-                NodeValue::List(inner) => {
-                    out.push_str(&render_list(child, inner.list_type, inner.start, depth + 1));
-                    out.push('\n');
-                }
-                _ => {
-                    let prefix = if first {
-                        format!("{indent}{marker}")
-                    } else {
-                        format!("{indent}   ")
-                    };
-                    out.push_str(&prefix);
-                    out.push_str(&inline_text(child));
-                    out.push('\n');
-                    first = false;
-                }
-            }
-        }
-    }
-    out.trim_end().to_string()
 }
 
 fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
