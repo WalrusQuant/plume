@@ -87,14 +87,16 @@
       const first = panel.querySelector<HTMLElement>(FOCUSABLE);
       (first ?? panel).focus();
     });
+    // Only attach the keydown listener while the dialog is open — avoids
+    // interfering with the main editor's Tab handling when no dialog is visible.
+    window.addEventListener("keydown", onKeydown);
     return () => {
+      window.removeEventListener("keydown", onKeydown);
       previouslyFocused?.focus?.();
       previouslyFocused = null;
     };
   });
 </script>
-
-<svelte:window onkeydown={onKeydown} />
 
 {#if open}
   <div
