@@ -623,36 +623,65 @@ pub fn stop_stream(app: &AppHandle, state: &AiState) {
     }
 }
 
-/// Drain complete lines (terminated by '\n') from a byte buffer, passing each
-/// `data: ` payload to `on_data`. The buffer holds raw bytes — decoding only
-/// complete lines means a multi-byte UTF-8 character split across two network
-/// chunks is decoded whole instead of becoming U+FFFD replacement characters
-/// (which v2 would persist into documents via expand/multiply).
+/// Drain complete lines (terminated by '\n') from a byte buffer. Per the SSE
+/// spec, a single event may span multiple `data:` lines (concatenated with
+/// `\n`); the event is dispatched only on a blank-line boundary. Non-`data:`
+/// lines (event/id/retry/comments) are ignored. The buffer holds raw bytes so a
+/// multi-byte UTF-8 character split across two network chunks decodes whole
+/// instead of becoming U+FFFD replacement characters.
 fn drain_sse_lines(
     buffer: &mut Vec<u8>,
+    pending_data: &mut String,
     on_data: &mut impl FnMut(&str) -> Result<()>,
 ) -> Result<()> {
     while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
         let line: Vec<u8> = buffer.drain(..=pos).collect();
         let line = String::from_utf8_lossy(&line);
-        if let Some(data) = line.trim_end().strip_prefix("data: ") {
-            on_data(data)?;
+        let trimmed = line.trim_end_matches(['\r', '\n']);
+        if trimmed.is_empty() {
+            // blank line = event boundary; dispatch accumulated data
+            if !pending_data.is_empty() {
+                on_data(pending_data)?;
+                pending_data.clear();
+            }
+            continue;
         }
+        if let Some(data) = trimmed.strip_prefix("data: ") {
+            if !pending_data.is_empty() {
+                pending_data.push('\n');
+            }
+            pending_data.push_str(data);
+        } else if let Some(data) = trimmed.strip_prefix("data:") {
+            // SSE allows `data:` with no space; spec concatenates with \n
+            if !pending_data.is_empty() {
+                pending_data.push('\n');
+            }
+            pending_data.push_str(data);
+        }
+        // other field types (event:, id:, retry:, comments starting with `:`)
+        // are ignored — not used by either provider today
     }
     Ok(())
 }
 
 /// Read SSE `data:` payloads from a response, calling `on_event` per payload.
+/// Each payload is one fully-assembled event's data (multi-line `data:` fields
+/// joined with `\n` per spec).
 async fn for_each_sse_data(
     response: reqwest::Response,
     mut on_event: impl FnMut(&str) -> Result<()>,
 ) -> Result<()> {
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
+    let mut pending_data = String::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| Error::InvalidInput(format!("stream error: {e}")))?;
         buffer.extend_from_slice(&chunk);
-        drain_sse_lines(&mut buffer, &mut on_event)?;
+        drain_sse_lines(&mut buffer, &mut pending_data, &mut on_event)?;
+    }
+    // Flush any trailing data (some servers omit a final blank line before EOF)
+    if !pending_data.is_empty() {
+        on_event(&pending_data)?;
     }
     Ok(())
 }
@@ -1369,36 +1398,54 @@ mod tests {
     #[test]
     fn sse_multibyte_char_split_across_chunks_decodes_whole() {
         // "é" is 0xC3 0xA9 — split it across two network chunks
-        let payload = "data: é\n".as_bytes();
+        let payload = b"data: \xC3\xA9\n\n";
         let mut buffer: Vec<u8> = Vec::new();
+        let mut pending = String::new();
         let mut seen: Vec<String> = Vec::new();
         buffer.extend_from_slice(&payload[..7]); // ends mid-character
-        drain_sse_lines(&mut buffer, &mut |d| {
+        drain_sse_lines(&mut buffer, &mut pending, &mut |d| {
             seen.push(d.to_string());
             Ok(())
         })
         .unwrap();
         assert!(seen.is_empty(), "incomplete line must stay buffered");
         buffer.extend_from_slice(&payload[7..]);
-        drain_sse_lines(&mut buffer, &mut |d| {
+        drain_sse_lines(&mut buffer, &mut pending, &mut |d| {
             seen.push(d.to_string());
             Ok(())
         })
         .unwrap();
-        assert_eq!(seen, vec!["é"]);
+        assert_eq!(seen, vec!["\u{00E9}"]);
+    }
+
+    #[test]
+    fn sse_multi_line_data_fields_are_joined() {
+        // SSE spec: multiple `data:` lines in one event are joined with `\n`
+        let mut buffer = b"data: {\"a\":\n\n".to_vec();
+        let mut pending = String::new();
+        let mut seen: Vec<String> = Vec::new();
+        drain_sse_lines(&mut buffer, &mut pending, &mut |d| {
+            seen.push(d.to_string());
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen, vec!["{\"a\":"]);
     }
 
     #[test]
     fn sse_multiple_lines_in_one_chunk() {
-        let mut buffer = b"data: one\n\ndata: two\nleftover".to_vec();
+        // two complete events (each terminated by a blank line) + leftover
+        let mut buffer = b"data: one\n\ndata: two\n\nleftover".to_vec();
+        let mut pending = String::new();
         let mut seen: Vec<String> = Vec::new();
         let mut on_data = |d: &str| {
             seen.push(d.to_string());
             Ok(())
         };
-        drain_sse_lines(&mut buffer, &mut on_data).unwrap();
+        drain_sse_lines(&mut buffer, &mut pending, &mut on_data).unwrap();
         assert_eq!(seen, vec!["one", "two"]);
         assert_eq!(buffer, b"leftover");
+        assert!(pending.is_empty());
     }
 
     #[test]

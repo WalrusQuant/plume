@@ -264,7 +264,7 @@ class AssistantStore {
       this.activeChatId = chats[0].id;
       this.messages = messages;
     } catch (e) {
-      toast.error(`Couldn't load chat: ${e instanceof Error ? e.message : String(e)}`);
+      toast.error(`Couldn't load chat: ${formatError(e)}`);
       this.chats = [];
       this.activeChatId = null;
       this.messages = [];

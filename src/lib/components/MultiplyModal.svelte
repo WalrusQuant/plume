@@ -2,6 +2,7 @@
   import type { DocType } from "$lib/api";
   import { MULTIPLY_TARGETS, type MultiplyProgress } from "$lib/multiplyTargets";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
+  import Dialog from "$lib/components/Dialog.svelte";
 
   interface Props {
     open: boolean;
@@ -40,32 +41,10 @@
   function close() {
     if (canClose) onClose();
   }
-
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") close();
-  }
 </script>
 
-{#if open}
-  <div class="dialog-overlay" onclick={close} role="presentation">
-    <div
-      class="dialog"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={handleKeyDown}
-      role="dialog"
-      tabindex="-1"
-    >
-      <div class="dialog-header">
-        <h3 class="dialog-title">Multiply “{sourceName}”</h3>
-        <button class="dialog-close" onclick={close} title="Close" disabled={!canClose}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-
-      <div class="dialog-body">
+<Dialog {open} title={`Multiply “${sourceName}”`} onClose={close} dismissible={canClose}>
+  <div class="dialog-body">
         {#if !isConfigured}
           <p class="multiply-hint">Add an AI API key in Settings to multiply documents.</p>
           <button class="dialog-btn dialog-btn--primary" onclick={onOpenSettings}>
@@ -115,7 +94,8 @@
         {/if}
       </div>
 
-      <div class="dialog-footer">
+  {#snippet footer()}
+    <div class="dialog-footer">
         {#if progress}
           {#if running}
             <button class="dialog-btn dialog-btn--secondary" onclick={onCancel}>Cancel</button>
@@ -134,9 +114,8 @@
           </button>
         {/if}
       </div>
-    </div>
-  </div>
-{/if}
+  {/snippet}
+</Dialog>
 
 <style>
   .multiply-hint {

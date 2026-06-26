@@ -2,6 +2,7 @@
   import { api, type AIProvider } from "$lib/api";
   import { assistant, DEFAULT_MODELS } from "$lib/assistant.svelte";
   import { toast } from "$lib/toast.svelte";
+  import Dialog from "$lib/components/Dialog.svelte";
 
   interface Props {
     open: boolean;
@@ -117,32 +118,10 @@
       keyError = String(err);
     }
   }
-
-  function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") onClose();
-  }
 </script>
 
-{#if open}
-  <div class="dialog-overlay" onclick={onClose} role="presentation">
-    <div
-      class="dialog"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={handleKeyDown}
-      role="dialog"
-      tabindex="-1"
-    >
-      <div class="dialog-header">
-        <h3 class="dialog-title">Settings</h3>
-        <button class="dialog-close" onclick={onClose} title="Close">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-
-      <form class="dialog-body" onsubmit={save}>
+<Dialog {open} title="Settings" {onClose}>
+  <form class="dialog-body" onsubmit={save}>
         <label class="dialog-label" for="settings-provider">AI provider</label>
         <div class="assistant-provider-row" id="settings-provider">
           <button
@@ -242,13 +221,13 @@
         </p>
       </form>
 
-      <div class="dialog-footer">
-        <button class="dialog-btn dialog-btn--secondary" onclick={onClose}>Cancel</button>
-        <button class="dialog-btn dialog-btn--primary" onclick={save}>Save</button>
-      </div>
+  {#snippet footer()}
+    <div class="dialog-footer">
+      <button class="dialog-btn dialog-btn--secondary" onclick={onClose}>Cancel</button>
+      <button class="dialog-btn dialog-btn--primary" onclick={save}>Save</button>
     </div>
-  </div>
-{/if}
+  {/snippet}
+</Dialog>
 
 <style>
   .key-remove-btn {

@@ -1,6 +1,8 @@
 <script lang="ts">
   import { toast } from "$lib/toast.svelte";
   import { formatError } from "$lib/formatError";
+  import { confirm } from "@tauri-apps/plugin-dialog";
+  import Dialog from "$lib/components/Dialog.svelte";
 
   // Small capture/edit modal for ideas. Ideas are quick notes — they never open
   // in the big editor, so all capture and editing happens here. Reuses the
@@ -57,13 +59,12 @@
   }
 
   /** Dismiss, guarding unsaved edits so a stray click doesn't drop a captured idea. */
-  function requestClose() {
-    if (dirty && !confirm("Discard this idea?")) return;
+  async function requestClose() {
+    if (dirty && !(await confirm("Discard this idea?"))) return;
     onClose();
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.key === "Escape") requestClose();
     // Cmd/Ctrl+Enter saves; plain Enter must insert newlines in the textarea.
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
@@ -72,50 +73,38 @@
   }
 </script>
 
-{#if open}
-  <div class="dialog-overlay" onclick={requestClose} role="presentation">
-    <div
-      class="dialog"
-      onclick={(e) => e.stopPropagation()}
+<Dialog
+  {open}
+  title={mode === "new" ? "New Idea" : "Edit Idea"}
+  onClose={requestClose}
+  onOverlayClick={requestClose}
+>
+  <div class="dialog-body">
+    <input
+      class="dialog-input"
+      type="text"
+      bind:value={title}
+      placeholder="Title (optional)"
+    />
+    <textarea
+      class="dialog-textarea"
+      bind:value={body}
+      placeholder="Capture a quick idea…"
       onkeydown={handleKeyDown}
-      role="dialog"
-      tabindex="-1"
-    >
-      <div class="dialog-header">
-        <h3 class="dialog-title">{mode === "new" ? "New Idea" : "Edit Idea"}</h3>
-        <button class="dialog-close" onclick={requestClose} title="Close">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-
-      <div class="dialog-body">
-        <input
-          class="dialog-input"
-          type="text"
-          bind:value={title}
-          placeholder="Title (optional)"
-        />
-        <textarea
-          class="dialog-textarea"
-          bind:value={body}
-          placeholder="Capture a quick idea…"
-          use:focusOnMount
-        ></textarea>
-      </div>
-
-      <div class="dialog-footer">
-        <span class="idea-save-hint">⌘↵ to save</span>
-        <button class="dialog-btn dialog-btn--secondary" onclick={requestClose}>Cancel</button>
-        <button class="dialog-btn dialog-btn--primary" onclick={handleSave} disabled={saving}>
-          {mode === "new" ? "Save" : "Save changes"}
-        </button>
-      </div>
-    </div>
+      use:focusOnMount
+    ></textarea>
   </div>
-{/if}
+
+  {#snippet footer()}
+    <div class="dialog-footer">
+      <span class="idea-save-hint">⌘↵ to save</span>
+      <button class="dialog-btn dialog-btn--secondary" onclick={requestClose}>Cancel</button>
+      <button class="dialog-btn dialog-btn--primary" onclick={handleSave} disabled={saving}>
+        {mode === "new" ? "Save" : "Save changes"}
+      </button>
+    </div>
+  {/snippet}
+</Dialog>
 
 <style>
   .idea-save-hint {
