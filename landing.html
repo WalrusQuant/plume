@@ -3,34 +3,38 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Plume — the notebook that writes with you</title>
-<meta name="description" content="A local-first desktop markdown notebook with an AI writing partner. Capture ideas, draft, refine, and export your writing — all in one fast, private app." />
+<title>Plume — a digital markdown notebook with an AI writing partner</title>
+<meta name="description" content="A local-first digital markdown notebook. At its simplest, a fast and private editor with live preview. At its fullest, an AI writing partner that drafts, rewrites, and turns one piece of writing into content for every platform." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400;1,9..144,500&family=Hanken+Grotesk:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-sans: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --font-mono: 'IBM Plex Mono', 'SF Mono', monospace;
 
-    --bg: #161616;
-    --bg-elevated: #1c1c1c;
-    --surface: #1e1e1e;
-    --border: #2a2a2a;
-    --border-light: #3a3a3a;
+    /* warm charcoal + ivory — drawn from the app icon */
+    --bg: #131110;
+    --bg-elevated: #1a1715;
+    --surface: #1c1917;
+    --border: #2a2521;
+    --border-light: #3b342c;
 
-    --text-primary: #e8e8e8;
-    --text-secondary: #a8a8a8;
-    --text-tertiary: #6e6e6e;
+    --text-primary: #f2ece1;
+    --text-secondary: #b4ab9c;
+    --text-tertiary: #7c7468;
 
-    --accent: #4a9eff;
-    --accent-dim: #3a7ecc;
-    --accent-surface: rgba(74, 158, 255, 0.08);
+    /* muted brass — the single warm accent, used sparingly */
+    --accent: #c6a16a;
+    --accent-dim: #a8854f;
+    --accent-surface: rgba(198, 161, 106, 0.09);
+    --cream: #f2ece1;
 
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 16px;
-    --transition: 0.18s ease;
+    --transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 
     color-scheme: dark;
   }
@@ -48,22 +52,33 @@
     overflow-x: hidden;
   }
 
+  /* fine paper grain over everything — tactile depth, not flat black */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
   a { color: inherit; text-decoration: none; }
 
-  ::selection { background: var(--accent-surface); color: #fff; }
+  ::selection { background: rgba(198, 161, 106, 0.22); color: var(--cream); }
 
-  /* ---------- ambient glow ---------- */
+  /* ---------- ambient warmth ---------- */
   .glow {
     position: fixed;
-    top: -25%;
+    top: -30%;
     left: 50%;
     transform: translateX(-50%);
-    width: 1100px;
-    height: 700px;
-    background: radial-gradient(ellipse at center, rgba(74, 158, 255, 0.14), transparent 65%);
+    width: 1200px;
+    height: 760px;
+    background: radial-gradient(ellipse at center, rgba(198, 161, 106, 0.10), transparent 62%);
     pointer-events: none;
     z-index: 0;
-    filter: blur(20px);
+    filter: blur(30px);
   }
 
   .wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 28px; }
@@ -75,16 +90,23 @@
     justify-content: space-between;
     padding: 26px 0;
   }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 1.1rem; letter-spacing: -0.01em; }
+  .brand { display: flex; align-items: center; gap: 11px; font-family: var(--font-display); font-weight: 500; font-size: 1.18rem; letter-spacing: 0.01em; }
   .brand .mark {
-    width: 30px; height: 30px;
+    width: 32px; height: 32px;
     display: grid; place-items: center;
-    background: linear-gradient(145deg, var(--accent), var(--accent-dim));
+    background: #1a1715;
+    border: 1px solid var(--border-light);
     border-radius: 9px;
-    box-shadow: 0 4px 14px rgba(74, 158, 255, 0.35);
-    font-size: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    font-family: var(--font-display);
+    font-weight: 500;
+    font-size: 19px;
+    line-height: 1;
+    color: var(--cream);
+    padding-bottom: 2px;
   }
   .nav-links { display: flex; gap: 28px; align-items: center; font-size: 0.92rem; color: var(--text-secondary); }
+  .nav-links a { transition: var(--transition); }
   .nav-links a:hover { color: var(--text-primary); }
   .nav-links .ghost {
     border: 1px solid var(--border-light);
@@ -97,6 +119,19 @@
 
   /* ---------- hero ---------- */
   .hero { text-align: center; padding: 64px 0 40px; }
+
+  /* one orchestrated load — staggered rise, nothing scattered */
+  .hero > * { animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .hero .pill { animation-delay: 0.04s; }
+  .hero h1 { animation-delay: 0.12s; }
+  .hero .sub { animation-delay: 0.22s; }
+  .hero .cta-row { animation-delay: 0.32s; }
+  .hero .shot { animation-delay: 0.44s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .hero > * { animation: none; }
+    html { scroll-behavior: auto; }
+  }
   .pill {
     display: inline-flex; align-items: center; gap: 8px;
     font-size: 0.8rem; color: var(--text-secondary);
@@ -108,24 +143,29 @@
   .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 
   h1 {
-    font-size: clamp(2.4rem, 5.5vw, 3.9rem);
-    line-height: 1.07;
-    font-weight: 600;
-    letter-spacing: -0.035em;
-    margin-bottom: 22px;
+    font-family: var(--font-display);
+    font-size: clamp(2.6rem, 6vw, 4.4rem);
+    line-height: 1.06;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    margin-bottom: 24px;
+    color: var(--cream);
   }
   h1 .grad {
-    background: linear-gradient(120deg, #fff 10%, var(--accent) 90%);
+    font-style: italic;
+    font-weight: 400;
+    background: linear-gradient(110deg, var(--cream) 20%, var(--accent) 95%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
   .sub {
-    font-size: clamp(1.05rem, 2vw, 1.28rem);
+    font-size: clamp(1.05rem, 2vw, 1.25rem);
     color: var(--text-secondary);
-    max-width: 620px;
+    max-width: 600px;
     margin: 0 auto 36px;
     font-weight: 300;
+    line-height: 1.65;
   }
 
   .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
@@ -136,12 +176,12 @@
     display: inline-flex; align-items: center; gap: 9px;
   }
   .btn-primary {
-    background: var(--accent); color: #fff;
-    box-shadow: 0 6px 20px rgba(74, 158, 255, 0.3);
+    background: var(--cream); color: #16120d;
+    box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
   }
-  .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); box-shadow: 0 10px 28px rgba(74, 158, 255, 0.4); }
+  .btn-primary:hover { background: #fff; transform: translateY(-1px); box-shadow: 0 16px 38px -12px rgba(0, 0, 0, 0.8); }
   .btn-secondary { background: var(--surface); border-color: var(--border-light); color: var(--text-primary); }
-  .btn-secondary:hover { border-color: var(--text-tertiary); }
+  .btn-secondary:hover { border-color: var(--accent); background: var(--accent-surface); }
 
   /* ---------- screenshot frame ---------- */
   .shot { margin: 56px auto 0; max-width: 1000px; }
@@ -174,13 +214,13 @@
     color: var(--text-tertiary); font-size: 0.85rem; font-family: var(--font-mono);
   }
   .strip span { white-space: nowrap; }
-  .strip b { color: var(--text-secondary); font-weight: 500; }
+  .strip b { color: var(--accent); font-weight: 500; }
 
   /* ---------- features ---------- */
   section { padding: 96px 0; }
   section.wrap { padding-top: 96px; padding-bottom: 96px; }
   .eyebrow { color: var(--accent); font-size: 0.82rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; margin-bottom: 14px; }
-  .section-title { font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 600; letter-spacing: -0.025em; text-align: center; margin-bottom: 16px; }
+  .section-title { font-family: var(--font-display); font-size: clamp(1.9rem, 4vw, 2.7rem); font-weight: 400; letter-spacing: -0.01em; text-align: center; margin-bottom: 16px; color: var(--cream); }
   .section-lede { text-align: center; color: var(--text-secondary); max-width: 560px; margin: 0 auto 56px; font-weight: 300; }
 
   .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
@@ -191,13 +231,14 @@
     padding: 26px 24px;
     transition: var(--transition);
   }
-  .card:hover { border-color: var(--border-light); transform: translateY(-3px); }
+  .card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.7); }
   .card .ico {
-    width: 40px; height: 40px; border-radius: 9px;
+    width: 42px; height: 42px; border-radius: 10px;
     background: var(--accent-surface); color: var(--accent);
+    border: 1px solid rgba(198, 161, 106, 0.22);
     display: grid; place-items: center; font-size: 19px; margin-bottom: 16px;
   }
-  .card h3 { font-size: 1.08rem; font-weight: 600; margin-bottom: 7px; letter-spacing: -0.01em; }
+  .card h3 { font-family: var(--font-display); font-size: 1.22rem; font-weight: 500; margin-bottom: 8px; letter-spacing: 0; color: var(--cream); }
   .card p { color: var(--text-secondary); font-size: 0.93rem; font-weight: 300; }
 
   /* ---------- flow / build-in-public ---------- */
@@ -214,7 +255,7 @@
     font-family: var(--font-mono); font-size: 0.95rem;
     background: var(--accent-surface);
   }
-  .step h4 { font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; }
+  .step h4 { font-family: var(--font-display); font-size: 1.2rem; font-weight: 500; margin-bottom: 8px; color: var(--cream); }
   .step p { color: var(--text-secondary); font-size: 0.9rem; font-weight: 300; }
 
   /* ---------- closing CTA ---------- */
@@ -226,7 +267,7 @@
     padding: 72px 32px;
     margin-bottom: 40px;
   }
-  .closing h2 { font-size: clamp(1.9rem, 4vw, 2.7rem); font-weight: 600; letter-spacing: -0.03em; margin-bottom: 14px; }
+  .closing h2 { font-family: var(--font-display); font-size: clamp(2rem, 4vw, 2.9rem); font-weight: 400; letter-spacing: -0.01em; margin-bottom: 14px; color: var(--cream); }
   .closing p { color: var(--text-secondary); max-width: 480px; margin: 0 auto 30px; font-weight: 300; }
   .price-note { margin-top: 18px; font-size: 0.85rem; color: var(--text-tertiary); }
 
@@ -252,7 +293,7 @@
 
 <div class="wrap">
   <nav>
-    <div class="brand"><span class="mark">✦</span> Plume</div>
+    <div class="brand"><span class="mark">P</span> Plume</div>
     <div class="nav-links">
       <span class="links-inline" style="display:flex; gap:28px;">
         <a href="#features">Features</a>
@@ -263,7 +304,6 @@
   </nav>
 
   <header class="hero">
-    <div class="pill"><span class="dot"></span> Local-first · BYOK · your words stay yours</div>
     <h1>The notebook that<br /><span class="grad">writes with you.</span></h1>
     <p class="sub">
       Plume is a desktop markdown notebook with an AI partner built in. Capture
@@ -288,17 +328,17 @@
 </div>
 
 <div class="strip">
+  <span><b>Markdown</b> editor + live preview</span>
   <span><b>AI</b> writing partner</span>
   <span><b>Inline</b> rewrites</span>
-  <span><b>Multiply</b> to every platform</span>
-  <span><b>Editor</b> + live preview</span>
+  <span><b>Write once</b>, multiply everywhere</span>
   <span><b>Local</b> &amp; private by default</span>
 </div>
 
 <section id="features" class="wrap">
-  <div class="eyebrow">Your AI writing studio</div>
-  <h2 class="section-title">The whole writing loop, with AI built in</h2>
-  <p class="section-lede">Not a chatbot bolted onto an editor. The AI is woven through every step — drafting, rewriting, adapting — in one fast, private app.</p>
+  <div class="eyebrow">As much, or as little, as you need</div>
+  <h2 class="section-title">A markdown notebook that grows with you</h2>
+  <p class="section-lede">Use it as a plain, fast markdown editor. Or let the AI partner carry a piece all the way from rough draft to content for every platform. Same app — your call, every time.</p>
 
   <div class="grid">
     <div class="card">
@@ -318,8 +358,8 @@
     </div>
     <div class="card">
       <div class="ico">⧉</div>
-      <h3>Content multiplication</h3>
-      <p>From one finished piece, generate platform-native variants — blog, newsletter, LinkedIn, X thread — each a linked, editable document.</p>
+      <h3>Write once, multiply</h3>
+      <p>Write the piece once, then turn it into platform-native variants — blog, newsletter, LinkedIn, X thread — each a linked, editable document. No rewriting it five times.</p>
     </div>
     <div class="card">
       <div class="ico">↗</div>
@@ -335,15 +375,15 @@
 </section>
 
 <section id="how" class="wrap">
-  <div class="eyebrow">From a spark to a finished piece</div>
+  <div class="eyebrow">Write once, share anywhere</div>
   <h2 class="section-title">How it flows</h2>
-  <p class="section-lede">Capture loose thoughts and walk them all the way to something you're proud to share.</p>
+  <p class="section-lede">Whatever you're writing — a journal entry, a blog post, a paper, a skill doc — start it once and take it all the way to wherever it needs to go.</p>
 
   <div class="flow">
     <div class="step">
       <div class="n">1</div>
-      <h4>Capture</h4>
-      <p>Drop a half-formed idea into the inbox without losing your place — organize it into a notebook later.</p>
+      <h4>Capture &amp; write</h4>
+      <p>Drop a half-formed thought into Ideas without losing your place, or just start writing in a fresh markdown doc.</p>
     </div>
     <div class="step">
       <div class="n">2</div>
@@ -352,8 +392,8 @@
     </div>
     <div class="step">
       <div class="n">3</div>
-      <h4>Refine &amp; export</h4>
-      <p>Polish in the editor, then export clean to Word, HTML, or wherever your words need to go.</p>
+      <h4>Reshape &amp; share</h4>
+      <p>Multiply one piece into a blog post, a thread, or a doc — then export clean to Word, HTML, or wherever you publish.</p>
     </div>
   </div>
 </section>
@@ -369,8 +409,8 @@
   </div>
 
   <footer>
-    <div class="brand"><span class="mark" style="width:24px;height:24px;font-size:13px;border-radius:7px;">✦</span> Plume</div>
-    <div>Your digital notebook for markdown. © 2026</div>
+    <div class="brand"><span class="mark" style="width:26px;height:26px;font-size:15px;border-radius:7px;">P</span> Plume</div>
+    <div>Your digital markdown notebook. © 2026</div>
   </footer>
 </div>
 
