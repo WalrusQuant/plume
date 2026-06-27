@@ -50,13 +50,19 @@ src-tauri/src/
                 voice_section() injects the global Voice & tone into all.
                 Anthropic server-side compaction (beta compact-2026-01-12) on
                 the chat path; system-prompt caching; token usage parsed from SSE
-  export/       linkedin.rs (Unicode clipboard text), x.rs (x-thread numbered
-                ≤280-char posts + x-article rich HTML paste), html.rs (self-
-                contained doc), docx.rs (full docx-rs build: heading styles,
-                Word-native numbering, task checkboxes, hyperlinks, embedded
-                images, footnotes, aligned/shaded tables, code shading); mod.rs
-                holds the TARGETS list + ExportOutput enum (Clipboard /
-                ClipboardHtml rich-paste / File / Cancelled)
+  export/       one renderer per publish target, all fed by the same comrak
+                parse. mod.rs holds the TARGETS list + ExportOutput enum
+                (Clipboard plain / ClipboardHtml rich-paste / File / Cancelled).
+                Targets: linkedin.rs (Unicode-styled clipboard), x.rs (X thread
+                ≤280 + X-Article rich HTML), mastodon.rs / bluesky.rs /
+                threads.rs (char-limited threads — all delegate to social.rs),
+                reddit.rs / discord.rs (markdown re-serialization, footnotes
+                stripped, tables re-emitted/flattened), telegram.rs (Telegram
+                HTML subset), richhtml.rs (generic rich paste — Google Docs +
+                Newsletter flavors), html.rs (standalone .html), docx.rs (full
+                docx-rs build), rtf.rs (hand-rolled RTF), markdown.rs (raw
+                source .md), plaintext.rs (stripped .txt). social.rs is the
+                shared thread segmenter used by every char-limited social target
   error.rs      thiserror enum, serialized as message string over IPC
 
 src/

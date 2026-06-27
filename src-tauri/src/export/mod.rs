@@ -1,6 +1,17 @@
 pub mod docx;
 pub mod html;
 pub mod linkedin;
+pub mod markdown;
+pub mod mastodon;
+pub mod bluesky;
+pub mod threads;
+pub mod plaintext;
+pub mod reddit;
+pub mod discord;
+pub mod richhtml;
+pub mod rtf;
+pub mod social;
+pub mod telegram;
 pub mod x;
 
 use comrak::nodes::{AstNode, ListType, NodeValue};
@@ -19,6 +30,7 @@ pub struct ExportTarget {
 }
 
 pub const TARGETS: &[ExportTarget] = &[
+    // Clipboard — plain text, platform-specific renderers.
     ExportTarget {
         id: "linkedin",
         label: "LinkedIn post",
@@ -38,6 +50,62 @@ pub const TARGETS: &[ExportTarget] = &[
         ext: None,
     },
     ExportTarget {
+        id: "mastodon",
+        label: "Mastodon thread",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "bluesky",
+        label: "Bluesky thread",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "threads",
+        label: "Threads post",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "reddit",
+        label: "Reddit (markdown)",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "discord",
+        label: "Discord (markdown)",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "telegram",
+        label: "Telegram (HTML)",
+        delivery: "clipboard",
+        ext: None,
+    },
+    // Clipboard — rich HTML paste into contenteditable composers.
+    ExportTarget {
+        id: "google-docs",
+        label: "Google Docs (rich paste)",
+        delivery: "clipboard",
+        ext: None,
+    },
+    ExportTarget {
+        id: "newsletter",
+        label: "Newsletter / Substack (rich paste)",
+        delivery: "clipboard",
+        ext: None,
+    },
+    // File exports.
+    ExportTarget {
+        id: "markdown",
+        label: "Markdown file",
+        delivery: "file",
+        ext: Some("md"),
+    },
+    ExportTarget {
         id: "html",
         label: "HTML file",
         delivery: "file",
@@ -48,6 +116,18 @@ pub const TARGETS: &[ExportTarget] = &[
         label: "Word document",
         delivery: "file",
         ext: Some("docx"),
+    },
+    ExportTarget {
+        id: "rtf",
+        label: "Rich text (RTF)",
+        delivery: "file",
+        ext: Some("rtf"),
+    },
+    ExportTarget {
+        id: "plaintext",
+        label: "Plain text file",
+        delivery: "file",
+        ext: Some("txt"),
     },
 ];
 

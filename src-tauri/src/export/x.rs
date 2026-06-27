@@ -1,88 +1,16 @@
-//! X (Twitter) export. Two targets share one plain-text block render:
+//! X (Twitter) export. Two targets:
 //!   - `x-thread`: segment the doc into numbered posts (≤280 chars), keeping
-//!     code blocks intact and links flattened to "text (url)".
+//!     code blocks intact and links flattened to "text (url)". Delegates the
+//!     segmentation to `social.rs`, which is shared by every char-limited
+//!     social target (Mastodon, Bluesky, Threads).
 //!   - `x-article`: rich HTML paste limited to what the X Article composer
 //!     keeps (headings, bold/italic/strike, lists, quotes, links, images);
 //!     tables and code blocks flatten to plain text. Plus a plain-text fallback.
-//!
-//! X has no markdown, so v1 emits plain text. Unicode styling like the
-//! LinkedIn exporter could be layered on later by extracting a shared
-//! styled-block walker; with only two such targets it isn't worth the
-//! coupling yet, so the block walk here is deliberately separate from
-//! `export/linkedin.rs` (which adds Unicode styling on the same shape).
 
 use comrak::nodes::{AstNode, ListType, NodeValue};
 
 /// X's hard limit per post.
-const HARD_LIMIT: usize = 280;
-/// Default packing limit — headroom for the "\n\nn/N" suffix on threads of up
-/// to 999 posts. Longer threads re-pack with a smaller limit (see
-/// `render_thread`) so the wider suffix still fits within the hard limit.
-const MAX_POST_CHARS: usize = 270;
-/// Visual divider between posts in the single clipboard/preview blob.
-const POST_SEPARATOR: &str = "\n\n━━━━━\n\n";
-
-/// How a block may be broken when it overflows a single post.
-enum Split {
-    /// Prose: break on word boundaries.
-    Words,
-    /// Lists: break on line boundaries (keeps bullets/numbers intact).
-    Lines,
-    /// Code blocks: never break, even if they overflow the limit.
-    Never,
-}
-
-struct Block {
-    text: String,
-    split: Split,
-}
-
-fn char_len(s: &str) -> usize {
-    s.chars().count()
-}
-
-/// Worst-case length of the "\n\nn/N" numbering suffix for a thread of `total`
-/// posts (a single-post thread is left unnumbered).
-fn suffix_len(total: usize) -> usize {
-    if total <= 1 {
-        return 0;
-    }
-    let digits = total.to_string().len();
-    2 + digits + 1 + digits // "\n\n" + n + "/" + N
-}
-
-/// Segment the document into numbered posts. Packs at MAX_POST_CHARS, then —
-/// if the thread is long enough that the numbering suffix would push posts
-/// past the 280 hard limit (≥1000 posts) — re-packs with a tighter limit.
-pub fn render_thread(content: &str) -> Vec<String> {
-    let blocks = collect_blocks(content);
-    let mut limit = MAX_POST_CHARS;
-    loop {
-        let posts = pack(&blocks, limit);
-        if posts.len() <= 1 || limit + suffix_len(posts.len()) <= HARD_LIMIT {
-            return number(posts);
-        }
-        // the limit strictly decreases each pass and suffix_len is bounded,
-        // so this converges in a couple of iterations
-        limit = HARD_LIMIT - suffix_len(posts.len());
-    }
-}
-
-/// The joined thread (numbered posts + dividers) — exactly what is copied.
-pub fn render_thread_text(content: &str) -> String {
-    render_thread(content).join(POST_SEPARATOR)
-}
-
-/// Flat plain-text rendering — the text/plain fallback for the Article paste.
-pub fn render_plain(content: &str) -> String {
-    collect_blocks(content)
-        .iter()
-        .map(|b| b.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n\n")
-        .trim()
-        .to_string()
-}
+pub const HARD_LIMIT: usize = 280;
 
 /// HTML for the X Article composer. X keeps only a subset of formatting —
 /// headings, bold/italic/strikethrough, links, bullet/numbered lists,
@@ -96,6 +24,24 @@ pub fn render_article_html(content: &str) -> String {
     let mut out = String::new();
     article_blocks(root, &mut out);
     out.trim().to_string()
+}
+
+/// Segment the document into numbered posts (≤280). Delegates to the shared
+/// social threader; kept as a thin wrapper so callers (and tests) that expect
+/// the X-specific entry point stay stable.
+#[cfg(test)]
+fn render_thread(content: &str) -> Vec<String> {
+    super::social::render_thread(content, HARD_LIMIT)
+}
+
+/// The joined thread (numbered posts + dividers) — exactly what is copied.
+pub fn render_thread_text(content: &str) -> String {
+    super::social::render_thread_text(content, HARD_LIMIT)
+}
+
+/// Flat plain-text rendering — the text/plain fallback for the Article paste.
+pub fn render_plain(content: &str) -> String {
+    super::social::render_plain(content)
 }
 
 fn esc(s: &str) -> String {
@@ -228,200 +174,13 @@ fn article_inline<'a>(node: &'a AstNode<'a>, out: &mut String) {
     }
 }
 
-fn collect_blocks(content: &str) -> Vec<Block> {
-    let arena = comrak::Arena::new();
-    let root = comrak::parse_document(&arena, content, &crate::preview::options());
-    let mut blocks = Vec::new();
-    walk(root, &mut blocks);
-    blocks
-}
-
-fn walk<'a>(node: &'a AstNode<'a>, blocks: &mut Vec<Block>) {
-    for child in node.children() {
-        match &child.data.borrow().value {
-            NodeValue::Heading(_) | NodeValue::Paragraph => {
-                let text = inline_text(child);
-                if !text.trim().is_empty() {
-                    blocks.push(Block { text, split: Split::Words });
-                }
-            }
-            NodeValue::List(list) => {
-                let text = super::render_plain_list(
-                    child,
-                    list.list_type,
-                    list.start,
-                    0,
-                    "  ",
-                    inline_text,
-                );
-                if !text.trim().is_empty() {
-                    blocks.push(Block { text, split: Split::Lines });
-                }
-            }
-            NodeValue::CodeBlock(cb) => {
-                blocks.push(Block {
-                    text: cb.literal.trim_end().to_string(),
-                    split: Split::Never,
-                });
-            }
-            NodeValue::ThematicBreak => {}
-            // block quotes and other containers: descend, treat inner blocks normally
-            _ => walk(child, blocks),
-        }
-    }
-}
-
-fn inline_text<'a>(node: &'a AstNode<'a>) -> String {
-    let mut out = String::new();
-    for child in node.children() {
-        match &child.data.borrow().value {
-            NodeValue::Text(t) => out.push_str(t),
-            NodeValue::Code(c) => out.push_str(&c.literal),
-            NodeValue::Emph | NodeValue::Strong | NodeValue::Strikethrough => {
-                out.push_str(&inline_text(child))
-            }
-            NodeValue::Link(link) => {
-                let text = inline_text(child);
-                if text.is_empty() || text == link.url {
-                    out.push_str(&link.url);
-                } else {
-                    out.push_str(&format!("{text} ({})", link.url));
-                }
-            }
-            NodeValue::Image(img) => {
-                let alt = inline_text(child);
-                if !alt.is_empty() {
-                    out.push_str(&format!("[{alt}: {}]", img.url));
-                }
-            }
-            NodeValue::SoftBreak => out.push(' '),
-            NodeValue::LineBreak => out.push('\n'),
-            _ => out.push_str(&inline_text(child)),
-        }
-    }
-    out
-}
-
-/// Greedily pack blocks into posts of at most `limit` chars, splitting any
-/// block that overflows.
-fn pack(blocks: &[Block], limit: usize) -> Vec<String> {
-    let mut posts: Vec<String> = Vec::new();
-    let mut current = String::new();
-    for block in blocks {
-        let pieces = match block.split {
-            Split::Never => vec![block.text.clone()],
-            Split::Words => split_by_words(&block.text, limit),
-            Split::Lines => split_by_lines(&block.text, limit),
-        };
-        for piece in pieces {
-            // a blank line ("\n\n") joins consecutive blocks within a post
-            let joined = char_len(&current) + 2 + char_len(&piece);
-            if !current.is_empty() && joined > limit {
-                posts.push(std::mem::take(&mut current));
-            }
-            if !current.is_empty() {
-                current.push_str("\n\n");
-            }
-            current.push_str(&piece);
-        }
-    }
-    let last = current.trim();
-    if !last.is_empty() {
-        posts.push(last.to_string());
-    }
-    posts
-}
-
-fn split_by_words(text: &str, limit: usize) -> Vec<String> {
-    if char_len(text) <= limit {
-        return vec![text.to_string()];
-    }
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        if char_len(word) > limit {
-            if !current.is_empty() {
-                chunks.push(std::mem::take(&mut current));
-            }
-            chunks.extend(hard_split(word, limit));
-            continue;
-        }
-        let extra = if current.is_empty() { 0 } else { 1 };
-        if !current.is_empty() && char_len(&current) + extra + char_len(word) > limit {
-            chunks.push(std::mem::take(&mut current));
-        }
-        if !current.is_empty() {
-            current.push(' ');
-        }
-        current.push_str(word);
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
-}
-
-fn split_by_lines(text: &str, limit: usize) -> Vec<String> {
-    if char_len(text) <= limit {
-        return vec![text.to_string()];
-    }
-    let mut chunks = Vec::new();
-    let mut current = String::new();
-    for line in text.lines() {
-        if char_len(line) > limit {
-            if !current.is_empty() {
-                chunks.push(std::mem::take(&mut current));
-            }
-            chunks.extend(split_by_words(line, limit));
-            continue;
-        }
-        let extra = if current.is_empty() { 0 } else { 1 };
-        if !current.is_empty() && char_len(&current) + extra + char_len(line) > limit {
-            chunks.push(std::mem::take(&mut current));
-        }
-        if !current.is_empty() {
-            current.push('\n');
-        }
-        current.push_str(line);
-    }
-    if !current.is_empty() {
-        chunks.push(current);
-    }
-    chunks
-}
-
-/// Last-resort split of a single token longer than the limit (e.g. a URL).
-fn hard_split(word: &str, limit: usize) -> Vec<String> {
-    let mut pieces = Vec::new();
-    let mut piece = String::new();
-    for c in word.chars() {
-        if char_len(&piece) == limit {
-            pieces.push(std::mem::take(&mut piece));
-        }
-        piece.push(c);
-    }
-    if !piece.is_empty() {
-        pieces.push(piece);
-    }
-    pieces
-}
-
-/// Append " n/N" numbering. A single-post thread is left unnumbered.
-fn number(posts: Vec<String>) -> Vec<String> {
-    let total = posts.len();
-    if total <= 1 {
-        return posts;
-    }
-    posts
-        .into_iter()
-        .enumerate()
-        .map(|(i, post)| format!("{post}\n\n{}/{total}", i + 1))
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn char_len(s: &str) -> usize {
+        s.chars().count()
+    }
 
     #[test]
     fn short_content_is_single_unnumbered_post() {

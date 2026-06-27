@@ -175,6 +175,50 @@ pub async fn export_document(
             html: export::x::render_article_html(&content),
             plain: export::x::render_plain(&content),
         }),
+        "mastodon" => Ok(ExportOutput::Clipboard {
+            text: export::mastodon::render_thread_text(&content),
+        }),
+        "bluesky" => Ok(ExportOutput::Clipboard {
+            text: export::bluesky::render_thread_text(&content),
+        }),
+        "threads" => Ok(ExportOutput::Clipboard {
+            text: export::threads::render_thread_text(&content),
+        }),
+        "reddit" => Ok(ExportOutput::Clipboard {
+            text: export::reddit::render(&content),
+        }),
+        "discord" => Ok(ExportOutput::Clipboard {
+            text: export::discord::render(&content),
+        }),
+        "telegram" => Ok(ExportOutput::Clipboard {
+            text: export::telegram::render(&content),
+        }),
+        "google-docs" => Ok(ExportOutput::ClipboardHtml {
+            html: export::richhtml::render(&content, export::richhtml::Flavor::Bare),
+            plain: export::plaintext::render(&content),
+        }),
+        "newsletter" => Ok(ExportOutput::ClipboardHtml {
+            html: export::richhtml::render(&content, export::richhtml::Flavor::Newsletter),
+            plain: export::plaintext::render(&content),
+        }),
+        "markdown" => {
+            let c = content.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                export::markdown::render(&c).as_bytes().to_vec()
+            })
+            .await
+            .map_err(|e| Error::InvalidInput(format!("export task failed: {e}")))?;
+            save_to_file(&app, &doc_name, target, bytes).await
+        }
+        "plaintext-file" | "plaintext" => {
+            let c = content.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                export::plaintext::render(&c).into_bytes()
+            })
+            .await
+            .map_err(|e| Error::InvalidInput(format!("export task failed: {e}")))?;
+            save_to_file(&app, &doc_name, target, bytes).await
+        }
         "html" => {
             // Rendering is CPU-bound (and docx decodes/re-encodes every embedded
             // image) — run it off the async runtime so a big export can't stall
@@ -182,6 +226,15 @@ pub async fn export_document(
             let (c, n) = (content.clone(), doc_name.clone());
             let bytes = tauri::async_runtime::spawn_blocking(move || {
                 export::html::render(&c, &n).into_bytes()
+            })
+            .await
+            .map_err(|e| Error::InvalidInput(format!("export task failed: {e}")))?;
+            save_to_file(&app, &doc_name, target, bytes).await
+        }
+        "rtf" => {
+            let c = content.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                export::rtf::render(&c).into_bytes()
             })
             .await
             .map_err(|e| Error::InvalidInput(format!("export task failed: {e}")))?;
