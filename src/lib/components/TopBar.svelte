@@ -9,6 +9,8 @@
     onToggleTheme: () => void;
     sidebarCollapsed: boolean;
     onToggleSidebar: () => void;
+    focusMode: boolean;
+    onToggleFocus: () => void;
     onRename: (name: string) => void;
     exportTargets: ExportTarget[];
     onExport: (targetId: string) => void;
@@ -23,6 +25,8 @@
     onToggleTheme,
     sidebarCollapsed,
     onToggleSidebar,
+    focusMode,
+    onToggleFocus,
     onRename,
     exportTargets,
     onExport,
@@ -94,6 +98,23 @@
     {#if exportStatus}
       <span class="topbar-export-status" role="status" aria-live="polite">{exportStatus}</span>
     {/if}
+    <button
+      class="topbar-theme-btn {focusMode ? 'topbar-theme-btn--active' : ''}"
+      onclick={onToggleFocus}
+      title={focusMode ? "Show preview panel" : "Focus mode — full-width editor"}
+      aria-label={focusMode ? "Show preview panel" : "Focus mode"}
+      aria-pressed={focusMode}
+    >
+      {#if focusMode}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 3v6H3M21 9h-6V3M3 15h6v6M15 21v-6h6" />
+        </svg>
+      {:else}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6" />
+        </svg>
+      {/if}
+    </button>
     <button class="topbar-theme-btn topbar-labeled-btn" onclick={onMultiply} title="Multiply into platform versions" aria-label="Multiply">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="6" cy="6" r="3" />

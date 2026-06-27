@@ -1505,6 +1505,18 @@ button:focus-visible {
   color: var(--toolbar-text-hover);
 }
 
+/* Pressed/active toggle (e.g. focus mode) — reads as "on" without a label. */
+.topbar-theme-btn--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.topbar-theme-btn--active:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* App-specific actions (Multiply / Export) carry a text label so they're not
    just ambiguous glyphs; the universal Settings/Theme stay icon-only. */
 .topbar-labeled-btn {
@@ -1631,6 +1643,14 @@ button:focus-visible {
   background: var(--preview-bg);
   border-left: 1px solid var(--border);
   scrollbar-width: thin;
+}
+
+/* Focus mode — the editor spans the full width (right pane unmounted). Keep a
+   comfortable reading measure by centering the whole scroller (gutter + text
+   move together, so the line-number gutter stays flush against the text). */
+.editor-container--focus .cm-scroller {
+  max-width: 860px;
+  margin: 0 auto;
 }
 
 /* ---------------------------------------------------------

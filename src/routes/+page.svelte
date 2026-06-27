@@ -35,6 +35,7 @@
   /** How often active editing produces an automatic version snapshot. */
   const SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
   const THEME_KEY = "markdown-theme";
+  const FOCUS_KEY = "markdown-focus-mode";
 
   let documents = $state<Document[]>([]);
   let folders = $state<Folder[]>([]);
@@ -46,6 +47,9 @@
 
   let theme = $state<Theme>("dark");
   let sidebarCollapsed = $state(false);
+  /** Focus mode: hide the right pane (preview/assistant/history) for a
+      distraction-free, full-width editor. Persisted across sessions. */
+  let focusMode = $state(false);
   let dialogOpen = $state(false);
   /** Type pre-selected in the new-document dialog (e.g. "plan" from the shelf). */
   let dialogInitialType = $state<DocType>("generic");
@@ -141,6 +145,9 @@
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
 
   function schedulePreview(content: string) {
+    // Right pane is unmounted in focus mode — don't burn IPC rendering a hidden
+    // preview. toggleFocusMode re-schedules a render when the pane reappears.
+    if (focusMode) return;
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = setTimeout(() => run(updatePreview(content), "Preview"), PREVIEW_DEBOUNCE_MS);
   }
@@ -674,9 +681,17 @@
     localStorage.setItem(THEME_KEY, next);
   }
 
+  function toggleFocusMode() {
+    focusMode = !focusMode;
+    localStorage.setItem(FOCUS_KEY, focusMode ? "1" : "0");
+    // ensure the preview is fresh when the pane reappears
+    if (!focusMode) schedulePreview(content);
+  }
+
   // ----- boot -----
 
   onMount(() => {
+    focusMode = localStorage.getItem(FOCUS_KEY) === "1";
     const stored = localStorage.getItem(THEME_KEY);
     const resolved =
       stored === "light" || stored === "dark"
@@ -802,6 +817,8 @@
         onToggleTheme={() => applyTheme(theme === "dark" ? "light" : "dark")}
         {sidebarCollapsed}
         onToggleSidebar={() => (sidebarCollapsed = !sidebarCollapsed)}
+        {focusMode}
+        onToggleFocus={toggleFocusMode}
         onRename={(name) => run(renameDocument(selectedDoc.id, name), "Rename")}
         {exportTargets}
         onExport={(targetId) => run(exportTo(targetId), "Export")}
@@ -810,7 +827,7 @@
         onOpenSettings={() => (settingsOpen = true)}
       />
       <Toolbar {editorView} />
-      <div class="editor-container">
+      <div class="editor-container {focusMode ? 'editor-container--focus' : ''}">
         <div class="editor-pane">
           {#if docLoading}
             <div class="pane-loading"><div class="loading-spinner"></div></div>
@@ -825,6 +842,7 @@
             />
           {/key}
         </div>
+        {#if !focusMode}
         <div class="preview-pane">
           <RightPaneTabs activeTab={rightTab} onTabChange={changeRightTab} />
           {#if rightTab === "preview"}
@@ -874,6 +892,7 @@
             </div>
           {/if}
         </div>
+        {/if}
       </div>
       <StatusBar documentName={selectedDoc.name} cursorPosition={cursorPos} {wordCount} {saveStatus} />
     {:else}
