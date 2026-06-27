@@ -149,7 +149,12 @@
     <div
       class="shelf-project-header"
       onclick={() => toggleExpanded(project.id)}
-      onkeydown={(e) => e.key === "Enter" && toggleExpanded(project.id)}
+      onkeydown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggleExpanded(project.id);
+        }
+      }}
       role="button"
       tabindex="0"
     >

@@ -254,7 +254,7 @@
             ~{contextTokens.toLocaleString()} tokens
           </span>
         {/if}
-        <button class="assistant-header-btn" onclick={() => guard(assistant.newChat(), "New chat")} title="New chat">
+        <button class="assistant-header-btn" onclick={() => guard(assistant.newChat(), "New chat")} title="New chat" aria-label="New chat">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
@@ -271,7 +271,7 @@
             </svg>
           </button>
         {/if}
-        <button class="assistant-header-btn" onclick={onOpenSettings} title="AI settings">
+        <button class="assistant-header-btn" onclick={onOpenSettings} title="AI settings" aria-label="AI settings">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="3" />
             <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
@@ -324,7 +324,7 @@
         </div>
       {/each}
       {#if assistant.isStreaming}
-        <div class="assistant-streaming">
+        <div class="assistant-streaming" role="status" aria-live="polite">
           {#if assistant.searchStatus}
             <svg class="assistant-search-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -333,7 +333,8 @@
             </svg>
             <span class="assistant-search-status">{assistant.searchStatus}</span>
           {:else}
-            <span class="assistant-streaming-dot"></span>
+            <span class="assistant-streaming-dot" aria-hidden="true"></span>
+            <span class="sr-only">Generating…</span>
           {/if}
         </div>
       {/if}
@@ -394,13 +395,13 @@
           </svg>
         </button>
         {#if assistant.isStreaming}
-          <button type="button" class="assistant-send-btn" onclick={() => void assistant.stop()} title="Stop">
+          <button type="button" class="assistant-send-btn" onclick={() => void assistant.stop()} title="Stop" aria-label="Stop">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
           </button>
         {:else}
-          <button type="submit" class="assistant-send-btn" disabled={!input.trim()} title="Send">
+          <button type="submit" class="assistant-send-btn" disabled={!input.trim()} title="Send" aria-label="Send">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />

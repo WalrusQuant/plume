@@ -60,6 +60,8 @@
       class="topbar-sidebar-btn"
       onclick={onToggleSidebar}
       title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+      aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+      aria-expanded={!sidebarCollapsed}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -90,9 +92,9 @@
   </div>
   <div class="topbar-right">
     {#if exportStatus}
-      <span class="topbar-export-status">{exportStatus}</span>
+      <span class="topbar-export-status" role="status" aria-live="polite">{exportStatus}</span>
     {/if}
-    <button class="topbar-theme-btn topbar-labeled-btn" onclick={onMultiply} title="Multiply into platform versions">
+    <button class="topbar-theme-btn topbar-labeled-btn" onclick={onMultiply} title="Multiply into platform versions" aria-label="Multiply">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="6" cy="6" r="3" />
         <circle cx="18" cy="6" r="3" />
@@ -102,7 +104,7 @@
       <span>Multiply</span>
     </button>
     <div class="topbar-export" use:clickOutside={() => (exportOpen = false)}>
-      <button class="topbar-theme-btn topbar-labeled-btn" onclick={() => (exportOpen = !exportOpen)} title="Export">
+      <button class="topbar-theme-btn topbar-labeled-btn" onclick={() => (exportOpen = !exportOpen)} title="Export" aria-haspopup="menu" aria-expanded={exportOpen} aria-label="Export">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
           <polyline points="7 10 12 15 17 10" />
@@ -111,10 +113,11 @@
         <span>Export</span>
       </button>
       {#if exportOpen}
-        <div class="export-menu" role="menu" tabindex="-1">
+        <div class="export-menu" role="menu" tabindex="-1" aria-label="Export targets">
           {#each exportTargets as target (target.id)}
             <button
               class="export-menu-item"
+              role="menuitem"
               onclick={() => {
                 exportOpen = false;
                 onExport(target.id);
@@ -129,7 +132,7 @@
         </div>
       {/if}
     </div>
-    <button class="topbar-theme-btn" onclick={onOpenSettings} title="Settings">
+    <button class="topbar-theme-btn" onclick={onOpenSettings} title="Settings" aria-label="Settings">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3" />
         <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
@@ -139,6 +142,7 @@
       class="topbar-theme-btn"
       onclick={onToggleTheme}
       title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
     >
       {#if theme === "dark"}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

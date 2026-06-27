@@ -18,7 +18,10 @@
   let name = $state("");
 
   $effect(() => {
-    if (open) selectedType = initialType;
+    if (open) {
+      selectedType = initialType;
+      name = "";
+    }
   });
 
   const selectedConfig = $derived(DOCUMENT_TYPES.find((t) => t.type === selectedType));

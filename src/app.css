@@ -248,6 +248,19 @@ button:focus-visible {
   to { transform: rotate(360deg); }
 }
 
+/* Respect the OS reduced-motion preference: stop perpetual spin/pulse/rotate
+   animations (spinners fall back to a static frame; spinners still indicate
+   "busy" via their presence). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
 /* Empty state */
 .empty-state {
   display: flex;
@@ -1301,7 +1314,10 @@ button:focus-visible {
 }
 
 .toast {
-  padding: 10px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--toolbar-bg);
@@ -1309,9 +1325,33 @@ button:focus-visible {
   font-size: 12.5px;
   font-family: var(--font-sans);
   text-align: left;
-  cursor: pointer;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
   word-break: break-word;
+}
+
+.toast-message {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-top: 1px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.toast-dismiss:hover {
+  background: var(--toolbar-btn-hover);
+  color: var(--text-primary);
 }
 
 .toast--error {

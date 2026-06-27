@@ -276,8 +276,15 @@
     editingFolderId = null;
   }
 
-  async function handleDeleteFolder(folder: Folder) {
-    const docsInFolder = documents.filter((d) => d.folderId === folder.id);
+  /** Keyboard activation for clickable rows — Enter or Space (button parity). */
+  function activateOn(e: KeyboardEvent, fn: () => void) {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      fn();
+    }
+  }
+
+  async function handleDeleteFolder(folder: Folder) {    const docsInFolder = documents.filter((d) => d.folderId === folder.id);
     const msg =
       docsInFolder.length > 0
         ? `Delete folder "${folder.name}"? ${docsInFolder.length} document(s) will be moved to unfiled.`
@@ -301,7 +308,7 @@
     ondrop={(e) => handleDrop(e, "doc", doc.id, section)}
     ondragend={handleDragEnd}
     onclick={() => onSelect(doc.id)}
-    onkeydown={(e) => e.key === "Enter" && onSelect(doc.id)}
+    onkeydown={(e) => activateOn(e, () => onSelect(doc.id))}
     role="button"
     tabindex="0"
   >
@@ -379,7 +386,7 @@
     ondrop={(e) => handleDrop(e, "doc", doc.id, "inbox")}
     ondragend={handleDragEnd}
     onclick={() => onOpenIdea(doc.id)}
-    onkeydown={(e) => e.key === "Enter" && onOpenIdea(doc.id)}
+    onkeydown={(e) => activateOn(e, () => onOpenIdea(doc.id))}
     role="button"
     tabindex="0"
   >
@@ -592,7 +599,7 @@
           ondrop={(e) => handleDrop(e, "folder", folder.id, "folders")}
           ondragend={handleDragEnd}
           onclick={() => toggleFolder(folder.id)}
-          onkeydown={(e) => e.key === "Enter" && toggleFolder(folder.id)}
+          onkeydown={(e) => activateOn(e, () => toggleFolder(folder.id))}
           role="button"
           tabindex="0"
         >

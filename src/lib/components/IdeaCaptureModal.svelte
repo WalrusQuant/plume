@@ -4,6 +4,11 @@
   import { confirm } from "@tauri-apps/plugin-dialog";
   import Dialog from "$lib/components/Dialog.svelte";
 
+  // Platform-correct modifier key glyph for the save hint.
+  const modKey = typeof navigator !== "undefined" && /Mac|iPhone|iPod|iPad/.test(navigator.platform)
+    ? "⌘"
+    : "Ctrl";
+
   // Small capture/edit modal for ideas. Ideas are quick notes — they never open
   // in the big editor, so all capture and editing happens here. Reuses the
   // shared .dialog-* shell. Only rendered while `open` is true, so local title/
@@ -97,7 +102,7 @@
 
   {#snippet footer()}
     <div class="dialog-footer">
-      <span class="idea-save-hint">⌘↵ to save</span>
+      <span class="idea-save-hint">{modKey}↵ to save</span>
       <button class="dialog-btn dialog-btn--secondary" onclick={requestClose}>Cancel</button>
       <button class="dialog-btn dialog-btn--primary" onclick={handleSave} disabled={saving}>
         {mode === "new" ? "Save" : "Save changes"}

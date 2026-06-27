@@ -121,6 +121,13 @@ export abstract class HeadlessStream {
   }
 
   protected finish(text: string) {
+    // A provider can return success with an empty body; resolving with "" would
+    // let callers create a brand-new document from nothing. Treat empty as a
+    // failure so the caller's catch surfaces it and no blank doc is created.
+    if (!text) {
+      this.fail(new Error(`${this.capitalizedLabel()} came back empty — nothing was generated`));
+      return;
+    }
     const resolve = this.resolve;
     this.cleanup();
     resolve?.(text);

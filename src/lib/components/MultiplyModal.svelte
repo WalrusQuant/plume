@@ -20,7 +20,12 @@
     $props();
 
   // Default every target checked — the common case is "give me all the versions".
+  // Reseeded on each open so a previous partial selection doesn't leak through.
   let selected = $state<Set<DocType>>(new Set(MULTIPLY_TARGETS.map((t) => t.type)));
+
+  $effect(() => {
+    if (open) selected = new Set(MULTIPLY_TARGETS.map((t) => t.type));
+  });
 
   const running = $derived(progress?.some((p) => p.status === "running") ?? false);
   const canClose = $derived(!running);

@@ -678,7 +678,13 @@
 
   onMount(() => {
     const stored = localStorage.getItem(THEME_KEY);
-    applyTheme(stored === "light" || stored === "dark" ? stored : "dark");
+    const resolved =
+      stored === "light" || stored === "dark"
+        ? stored
+        : window.matchMedia?.("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark";
+    applyTheme(resolved);
     void assistant.init();
     void inlineEdit.init();
     void ideaExpand.init();
