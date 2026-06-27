@@ -229,9 +229,13 @@
   }
 
   async function handleNewFolder() {
-    const folder = await onCreateFolder("New Folder");
-    editingFolderId = folder.id;
-    editFolderName = folder.name;
+    try {
+      const folder = await onCreateFolder("New Folder");
+      editingFolderId = folder.id;
+      editFolderName = folder.name;
+    } catch {
+      // createFolder already surfaced a toast; just don't enter rename mode
+    }
   }
 
   function startFolderRename(folder: Folder) {

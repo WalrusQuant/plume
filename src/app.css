@@ -1236,7 +1236,7 @@ button:focus-visible {
 }
 
 .topbar-doc-name--editable:hover {
-  background: var(--toolbar-hover);
+  background: var(--toolbar-btn-hover);
 }
 
 /* Preview mode toggle (Rendered / LinkedIn) */
@@ -1282,7 +1282,8 @@ button:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 200;
+  /* above dialogs/menus (z 1000) so errors fired during a dialog stay visible */
+  z-index: 1100;
   max-width: 380px;
 }
 
@@ -1343,7 +1344,7 @@ button:focus-visible {
 }
 
 .export-menu-item:hover {
-  background: var(--toolbar-hover);
+  background: var(--toolbar-btn-hover);
 }
 
 .export-menu-hint {

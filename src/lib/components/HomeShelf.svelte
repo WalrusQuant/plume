@@ -122,7 +122,13 @@
     const name = newProjectName.trim();
     creatingProject = false;
     newProjectName = "";
-    if (name) await onCreateProject(name);
+    if (name) {
+      try {
+        await onCreateProject(name);
+      } catch {
+        // onCreateProject already surfaced a toast
+      }
+    }
   }
 
   function focusOnMount(node: HTMLInputElement) {

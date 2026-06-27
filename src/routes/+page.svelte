@@ -290,11 +290,14 @@
     if (id === selectedDocId) return;
     await flushSave();
     const seq = ++docLoadSeq;
-    editorView = null;
     docLoading = true;
     try {
       const loaded = await api.getDocumentContent(id);
       if (seq !== docLoadSeq) return; // a newer switch superseded this; it owns the flag
+      // Null only once we're committed to the switch: if the fetch above threw,
+      // the old doc stays open and its editor must keep working (selectedDocId
+      // is unchanged on error, so the {#key} never remounts the Editor).
+      editorView = null;
       content = loaded;
       selectedDocId = id;
       schedulePreview(content);
@@ -628,9 +631,14 @@
   }
 
   async function createFolder(name: string): Promise<Folder> {
-    const folder = await api.createFolder(name);
-    folders = [...folders, folder];
-    return folder;
+    try {
+      const folder = await api.createFolder(name);
+      folders = [...folders, folder];
+      return folder;
+    } catch (e) {
+      toast.error(`Creating folder failed: ${formatError(e)}`);
+      throw e;
+    }
   }
 
   async function renameFolder(id: string, name: string) {

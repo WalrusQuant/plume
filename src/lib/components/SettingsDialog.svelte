@@ -25,6 +25,7 @@
   let formVoice = $state("");
   let keyInput = $state("");
   let keyError = $state("");
+  let tavilyKeyError = $state("");
   let hasSavedKey = $state(false);
   let tavilyKeyInput = $state("");
   let hasSavedTavilyKey = $state(false);
@@ -38,6 +39,7 @@
       keyInput = "";
       tavilyKeyInput = "";
       keyError = "";
+      tavilyKeyError = "";
       void api.hasTavilyKey().then((has) => (hasSavedTavilyKey = has));
     }
   });
@@ -115,7 +117,7 @@
       tavilyKeyInput = "";
       toast.show("Tavily key removed", "info");
     } catch (err) {
-      keyError = String(err);
+      tavilyKeyError = String(err);
     }
   }
 </script>
@@ -219,12 +221,15 @@
           The assistant searches the web with Tavily when you toggle search on in the chat.
           Get a free key at app.tavily.com (1,000 searches/month).
         </p>
+        {#if tavilyKeyError}
+          <p class="assistant-key-error">{tavilyKeyError}</p>
+        {/if}
       </form>
 
   {#snippet footer()}
     <div class="dialog-footer">
-      <button class="dialog-btn dialog-btn--secondary" onclick={onClose}>Cancel</button>
-      <button class="dialog-btn dialog-btn--primary" onclick={save}>Save</button>
+      <button type="button" class="dialog-btn dialog-btn--secondary" onclick={onClose}>Cancel</button>
+      <button type="submit" class="dialog-btn dialog-btn--primary">Save</button>
     </div>
   {/snippet}
 </Dialog>
