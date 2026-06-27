@@ -174,6 +174,26 @@ class AssistantStore {
   private streamErrored = false;
   private unlisteners: UnlistenFn[] = [];
   private listening = false;
+  /** Idle watchdog: cleared on each token; fires a timeout if a stream stalls. */
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Max idle time with no token/status/error/done before a stream is treated as hung. */
+  private static readonly IDLE_TIMEOUT_MS = 90_000;
+
+  private resetIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      // No activity arrived in time — treat as a hung connection.
+      toast.error("The reply timed out — no response from the provider.");
+      void this.stop();
+    }, AssistantStore.IDLE_TIMEOUT_MS);
+  }
+
+  private clearIdleTimer() {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
 
   get activeChat(): Chat | undefined {
     return this.chats.find((c) => c.id === this.activeChatId);
@@ -188,10 +208,14 @@ class AssistantStore {
       listen<StreamToken>("assistant:token", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
         this.searchStatus = null; // first reply token ends the tool-activity line
+        this.resetIdleTimer();
         this.appendToken(e.payload.text);
       }),
       listen<StreamStatus>("assistant:status", (e) => {
-        if (e.payload.id === this.activeStreamId) this.searchStatus = e.payload.message;
+        if (e.payload.id === this.activeStreamId) {
+          this.searchStatus = e.payload.message;
+          this.resetIdleTimer(); // tool activity (e.g. web search) is progress
+        }
       }),
       listen<StreamUsage>("assistant:usage", (e) => {
         if (e.payload.id === this.activeStreamId) this.recordUsage(e.payload);
@@ -204,6 +228,7 @@ class AssistantStore {
       }),
       listen<StreamDone>("assistant:done", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
+        this.clearIdleTimer();
         this.activeStreamId = null;
         this.isStreaming = false;
         this.searchStatus = null;
@@ -395,6 +420,7 @@ class AssistantStore {
         this.settings.webSearch,
         this.settings.voice || null,
       );
+      this.resetIdleTimer();
       // the request was accepted (key present, stream started) — only now
       // auto-title a still-default chat from its first message, so a failed
       // send doesn't rename a chat for an exchange that never happened
@@ -404,6 +430,7 @@ class AssistantStore {
       return true;
     } catch (e) {
       toast.error(`Sending message failed: ${formatError(e)}`);
+      this.clearIdleTimer();
       this.isStreaming = false;
       this.activeStreamId = null;
       // roll back the optimistic user message so it isn't persisted or merged
@@ -417,6 +444,7 @@ class AssistantStore {
   }
 
   async stop() {
+    this.clearIdleTimer();
     // drop the id first so events still in flight are ignored
     this.activeStreamId = null;
     this.isStreaming = false;

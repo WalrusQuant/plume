@@ -283,6 +283,25 @@ class InlineEditController {
   private streamed = "";
   private unlisteners: UnlistenFn[] = [];
   private listening = false;
+  /** Idle watchdog: cleared on each token; fires a timeout if a stream stalls. */
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Max idle time with no token/error/done before a stream is treated as hung. */
+  private static readonly IDLE_TIMEOUT_MS = 90_000;
+
+  private resetIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      toast.error("The inline edit timed out — no response from the provider.");
+      this.reject();
+    }, InlineEditController.IDLE_TIMEOUT_MS);
+  }
+
+  private clearIdleTimer() {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+  }
 
   /** Register the Tauri event listeners once. Mirrors AssistantStore.init. */
   async init() {
@@ -290,10 +309,14 @@ class InlineEditController {
     this.listening = true;
     this.unlisteners = await Promise.all([
       listen<StreamToken>("assistant:token", (e) => {
-        if (e.payload.id === this.activeStreamId) this.onToken(e.payload.text);
+        if (e.payload.id === this.activeStreamId) {
+          this.resetIdleTimer();
+          this.onToken(e.payload.text);
+        }
       }),
       listen<StreamDone>("assistant:done", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
+        this.clearIdleTimer();
         this.activeStreamId = null;
         if (e.payload.aborted) {
           // superseded by another AI action — the streamed text is truncated,
@@ -307,6 +330,7 @@ class InlineEditController {
       }),
       listen<StreamError>("assistant:error", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
+        this.clearIdleTimer();
         toast.error(`Inline edit error: ${e.payload.message}`);
         this.reject();
       }),
@@ -323,6 +347,7 @@ class InlineEditController {
   setContext(docId: string | null, getContent: () => string, onAccepted: () => void) {
     if (docId !== this.docId && this.activeStreamId) {
       // abort an in-flight edit; the old editor is being remounted
+      this.clearIdleTimer();
       this.activeStreamId = null;
       void api.stopAssistant();
     }
@@ -371,6 +396,7 @@ class InlineEditController {
         this.getContent(),
         assistant.settings.voice || null,
       )
+      .then(() => this.resetIdleTimer())
       .catch((e) => {
         toast.error(`Inline edit failed: ${formatError(e)}`);
         this.reject(view);
@@ -401,6 +427,7 @@ class InlineEditController {
     }
     this.accepting = true;
     try {
+      this.clearIdleTimer();
       this.activeStreamId = null;
       if (this.docId) {
         try {
@@ -426,6 +453,7 @@ class InlineEditController {
   reject(view?: EditorView) {
     const v = view ?? this.view;
     const wasStreaming = this.activeStreamId !== null;
+    this.clearIdleTimer();
     this.activeStreamId = null;
     this.streamed = "";
     if (wasStreaming) void api.stopAssistant();
@@ -437,6 +465,7 @@ class InlineEditController {
       that would otherwise keep running with nowhere to land. */
   onDocChanged() {
     if (this.activeStreamId) {
+      this.clearIdleTimer();
       this.activeStreamId = null;
       void api.stopAssistant();
       toast.error("Inline edit canceled — the document changed.");
