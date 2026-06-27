@@ -20,6 +20,7 @@ import { assistant } from "$lib/assistant.svelte";
 import { aiBusy } from "$lib/aiBusy.svelte";
 import { toast } from "$lib/toast.svelte";
 import { formatError } from "$lib/formatError";
+import { stripWrappingFence } from "$lib/textUtils";
 
 // ---------------------------------------------------------------------------
 // Inline AI edit — select text → menu (Rewrite/Shorten/Expand/Custom) →
@@ -88,14 +89,6 @@ const ACTIONS = [
   { label: "Shorten", instruction: "Make the selected text more concise without losing key meaning." },
   { label: "Expand", instruction: "Expand the selected text with more detail and supporting points." },
 ] as const;
-
-/** Strip a single code fence that wraps the entire text — a weaker model may
-    return the replacement fenced despite the prompt asking for raw text. Only
-    strips when the fence wraps everything, so genuinely fenced code survives. */
-function stripWrappingFence(s: string): string {
-  const m = s.trim().match(/^```[^\n]*\n([\s\S]*?)\n```$/);
-  return m ? m[1] : s;
-}
 
 function button(label: string, cls: string, onClick: () => void): HTMLButtonElement {
   const b = document.createElement("button");
