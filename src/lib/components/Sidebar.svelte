@@ -547,7 +547,7 @@
     </nav>
   {:else}
   <div class="sidebar-section-header">
-    <span class="sidebar-section-label">Inbox</span>
+    <span class="sidebar-section-label">Ideas</span>
     <div class="sidebar-section-actions">
       <button class="sidebar-new-btn" onclick={onNewIdea} title="New idea">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">

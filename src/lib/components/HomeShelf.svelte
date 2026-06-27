@@ -340,13 +340,13 @@
         <h2>Welcome to Plume</h2>
         <p>Write in markdown, then let AI reshape a finished piece into a version
           for every platform. A <strong>project</strong> keeps a piece and its
-          versions together; the <strong>Inbox</strong> holds quick ideas you can
+          versions together; <strong>Ideas</strong> holds quick notes you can
           expand into drafts later.</p>
         <div class="shelf-empty-actions">
           <button class="shelf-empty-btn" onclick={startNewProject} title="Group a piece and its platform versions">Start a project</button>
           <button class="shelf-empty-btn" onclick={onNewPlan} title="A structured plan document">Write a plan</button>
           <button class="shelf-empty-btn" onclick={() => onNewPage(null)} title="A blank markdown document">New document</button>
-          <button class="shelf-empty-btn" onclick={onNewIdea} title="A quick note for the Inbox">Capture an idea</button>
+          <button class="shelf-empty-btn" onclick={onNewIdea} title="A quick note for Ideas">Capture an idea</button>
         </div>
         {#if !isConfigured}
           <button class="shelf-empty-ai" onclick={onOpenSettings}>
@@ -391,7 +391,7 @@
 
       <div class="shelf-columns">
         <section class="shelf-col">
-          <h2 class="shelf-section-title">Inbox</h2>
+          <h2 class="shelf-section-title">Ideas</h2>
           {#each inbox as idea (idea.id)}
             {@render listRow(idea, onOpenIdea)}
           {/each}
