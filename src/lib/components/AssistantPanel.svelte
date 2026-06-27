@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { confirm } from "@tauri-apps/plugin-dialog";
   import { assistant } from "$lib/assistant.svelte";
   import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
@@ -20,6 +21,15 @@
   let input = $state("");
   let copiedIdx = $state<number | null>(null);
   let messagesEl: HTMLDivElement | undefined = $state();
+  /** True while the user is scrolled up reading history — pauses autoscroll. */
+  let pinnedToBottom = $state(true);
+
+  function onMessagesScroll() {
+    if (!messagesEl) return;
+    // Considered "at the bottom" if within ~80px (covers scrollbar + last msg padding)
+    const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+    pinnedToBottom = dist < 80;
+  }
 
   // @-mention: attach other documents as background context for one message.
   let inputEl: HTMLTextAreaElement | undefined = $state();
@@ -105,6 +115,7 @@
   $effect(() => {
     void assistant.messages.length;
     void assistant.messages[assistant.messages.length - 1]?.content;
+    if (!pinnedToBottom) return; // user is reading history; don't yank them down
     void tick().then(() => messagesEl?.scrollTo({ top: messagesEl.scrollHeight }));
   });
 
@@ -189,6 +200,14 @@
     }
     await assistant.toggleWebSearch();
   }
+
+  /** Confirm before irreversibly deleting the active chat thread. */
+  async function handleDeleteChat() {
+    if (!assistant.activeChatId) return;
+    if (await confirm("Delete this chat? This can't be undone.", { kind: "warning" })) {
+      guard(assistant.deleteChat(assistant.activeChatId), "Delete chat");
+    }
+  }
 </script>
 
 {#if !assistant.isConfigured}
@@ -243,8 +262,9 @@
         {#if assistant.chats.length > 1}
           <button
             class="assistant-header-btn"
-            onclick={() => guard(assistant.deleteChat(assistant.activeChatId!), "Delete chat")}
+            onclick={() => void handleDeleteChat()}
             title="Delete this chat"
+            aria-label="Delete this chat"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
@@ -266,7 +286,7 @@
       </div>
     {/if}
 
-    <div class="assistant-messages" bind:this={messagesEl}>
+    <div class="assistant-messages" bind:this={messagesEl} onscroll={onMessagesScroll}>
       {#if assistant.messages.length === 0}
         <div class="assistant-welcome">
           <p>Ask me to review, improve, or generate content for your document.</p>

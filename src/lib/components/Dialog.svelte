@@ -81,6 +81,9 @@
     if (!open) return;
     // capture the trigger so we can restore focus on close
     previouslyFocused = document.activeElement as HTMLElement | null;
+    // lock background scroll while the modal is open
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     // move focus into the dialog (first focusable or the panel itself)
     queueMicrotask(() => {
       if (!panel) return;
@@ -92,6 +95,7 @@
     window.addEventListener("keydown", onKeydown);
     return () => {
       window.removeEventListener("keydown", onKeydown);
+      document.body.style.overflow = prevOverflow;
       previouslyFocused?.focus?.();
       previouslyFocused = null;
     };

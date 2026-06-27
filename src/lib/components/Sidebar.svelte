@@ -75,6 +75,32 @@
     convertMenuId = convertMenuId === id ? null : id;
   }
 
+  // Dismiss the Expand/Convert menus on any outside pointerdown or Escape.
+  // The menu and its trigger button are siblings (not nested), so a plain
+  // clickOutside action on a shared container won't work; use a document listener.
+  $effect(() => {
+    if (!expandMenuId && !convertMenuId) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      // keep the click that lands on a menu or a trigger button (it toggles)
+      if (t?.closest(".sidebar-expand-menu, .sidebar-action-btn")) return;
+      expandMenuId = null;
+      convertMenuId = null;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        expandMenuId = null;
+        convertMenuId = null;
+      }
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  });
+
   let editingId = $state<string | null>(null);
   let editName = $state("");
   let collapsedFolders = $state(new Set<string>());

@@ -26,6 +26,9 @@ interface StreamError {
 /** Human-readable label used in messages ("expansion", "generation", etc.). */
 export type StreamLabel = string;
 
+/** Max idle time (ms) with no token/error/done before a stream is treated as hung. */
+const STREAM_IDLE_TIMEOUT_MS = 90_000;
+
 export abstract class HeadlessStream {
   /** True while a stream is active — drives the UI spinner. Subclass-owned. */
   abstract readonly isBusy: boolean;
@@ -36,6 +39,8 @@ export abstract class HeadlessStream {
   private reject: ((err: Error) => void) | null = null;
   private unlisteners: UnlistenFn[] = [];
   private listening = false;
+  /** Idle watchdog: cleared on each token, fires a timeout on expiry. */
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Register the Tauri event listeners once. */
   async init() {
@@ -43,7 +48,10 @@ export abstract class HeadlessStream {
     this.listening = true;
     this.unlisteners = await Promise.all([
       listen<StreamToken>("assistant:token", (e) => {
-        if (e.payload.id === this.activeStreamId) this.streamed += e.payload.text;
+        if (e.payload.id === this.activeStreamId) {
+          this.streamed += e.payload.text;
+          this.resetIdleTimer();
+        }
       }),
       listen<StreamDone>("assistant:done", (e) => {
         if (e.payload.id !== this.activeStreamId) return;
@@ -90,7 +98,18 @@ export abstract class HeadlessStream {
       this.reject = reject;
     });
     invoke(this.activeStreamId).catch((e) => this.fail(e instanceof Error ? e : new Error(String(e))));
+    this.resetIdleTimer();
     return promise;
+  }
+
+  /** Reset the idle watchdog — called on each token and at stream start. */
+  private resetIdleTimer() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      // No token/error/done arrived in time — treat as a hung connection.
+      void api.stopAssistant();
+      this.fail(new Error(`${this.capitalizedLabel()} timed out — no response from the provider`));
+    }, STREAM_IDLE_TIMEOUT_MS);
   }
 
   /** Abort the in-flight stream (user pressed Cancel). */
@@ -114,6 +133,10 @@ export abstract class HeadlessStream {
   }
 
   private cleanup() {
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
     this.activeStreamId = null;
     this.streamed = "";
     this.resolve = null;

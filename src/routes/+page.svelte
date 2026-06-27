@@ -87,9 +87,12 @@
   /** Unsaved content per document. Failed saves stay here until they land,
       so switching documents (and typing there) can't clobber them. */
   const pendingSaves = new Map<string, string>();
+  /** "saved" | "saving" | "unsaved" | "error" — drives the StatusBar indicator. */
+  let saveStatus = $state<"saved" | "saving" | "unsaved" | "error">("saved");
 
   function scheduleSave(docId: string, content: string) {
     pendingSaves.set(docId, content);
+    saveStatus = "unsaved";
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
   }
@@ -99,6 +102,8 @@
       clearTimeout(saveTimer);
       saveTimer = null;
     }
+    if (pendingSaves.size > 0) saveStatus = "saving";
+    let anyError = false;
     for (const [id, content] of [...pendingSaves]) {
       pendingSaves.delete(id);
       try {
@@ -107,6 +112,7 @@
         // keep it for the next keystroke/flush to retry — unless newer
         // content for this doc was scheduled while the save was in flight
         if (!pendingSaves.has(id)) pendingSaves.set(id, content);
+        anyError = true;
         toast.error(`Saving failed: ${formatError(e)}`);
         continue;
       }
@@ -114,6 +120,8 @@
       if (doc) doc.updatedAt = new Date().toISOString();
       maybeIntervalSnapshot(id, content);
     }
+    if (anyError) saveStatus = "error";
+    else if (pendingSaves.size === 0) saveStatus = "saved";
   }
 
   /** Capture an automatic version once per SNAPSHOT_INTERVAL_MS of editing. */
@@ -814,8 +822,11 @@
         <div class="preview-pane">
           <RightPaneTabs activeTab={rightTab} onTabChange={changeRightTab} />
           {#if rightTab === "preview"}
+            <div id="right-panel-preview" role="tabpanel" aria-labelledby="right-tab-preview" class="preview-panel-body">
             <div class="preview-mode-row">
+              <label class="sr-only" for="preview-mode-select">Preview mode</label>
               <select
+                id="preview-mode-select"
                 class="preview-mode-select"
                 value={previewMode}
                 onchange={(e) => setPreviewMode(e.currentTarget.value as PreviewMode)}
@@ -835,14 +846,18 @@
             {:else}
               <Preview htmlContent={previewHtml} />
             {/if}
+            </div>
           {:else if rightTab === "history"}
+            <div id="right-panel-history" role="tabpanel" aria-labelledby="right-tab-history" class="preview-panel-body">
             <HistoryPanel
               {snapshots}
               onSaveSnapshot={() => run(saveSnapshot(), "Save snapshot")}
               onRestore={(id) => run(restoreSnapshot(id), "Restore")}
               getSnapshotContent={(id) => api.getSnapshotContent(id)}
             />
+            </div>
           {:else}
+            <div id="right-panel-assistant" role="tabpanel" aria-labelledby="right-tab-assistant" class="preview-panel-body">
             <AssistantPanel
               onApply={applyAssistantContent}
               onInsert={insertAssistantContent}
@@ -850,10 +865,11 @@
               {documents}
               onOpenSettings={() => (settingsOpen = true)}
             />
+            </div>
           {/if}
         </div>
       </div>
-      <StatusBar documentName={selectedDoc.name} cursorPosition={cursorPos} {wordCount} />
+      <StatusBar documentName={selectedDoc.name} cursorPosition={cursorPos} {wordCount} {saveStatus} />
     {:else}
       <HomeShelf
         {documents}
