@@ -15,6 +15,8 @@
 
   --sidebar-bg: #1a1a1a;
   --sidebar-surface: #222222;
+  --sidebar-width: 260px;
+  --sidebar-width-narrow: 200px;
   --sidebar-text: #cccccc;
   --sidebar-muted: #777777;
   --sidebar-hover: rgba(255, 255, 255, 0.05);
@@ -84,6 +86,8 @@
 [data-theme="light"] {
   --sidebar-bg: #f6f6f6;
   --sidebar-surface: #ffffff;
+  --sidebar-width: 260px;
+  --sidebar-width-narrow: 200px;
   --sidebar-text: #1a1a1a;
   --sidebar-muted: #888888;
   --sidebar-hover: rgba(0, 0, 0, 0.03);
@@ -203,7 +207,7 @@ button:focus-visible {
 
 .app-layout {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: var(--sidebar-width) 1fr;
   height: 100vh;
   overflow: hidden;
   transition: grid-template-columns 0.2s ease;
@@ -258,6 +262,32 @@ button:focus-visible {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* Windows High Contrast / forced-colors mode: the dense custom palette
+   collapses, so surface borders + the focus ring must fall back to the
+   system "CanvasText"/"Highlight" tokens to stay legible. */
+@media (forced-colors: active) {
+  .dialog,
+  .toast,
+  .export-menu,
+  .move-menu,
+  .sidebar-item,
+  .shelf-project,
+  .preview-pane,
+  .editor-pane {
+    border: 1px solid CanvasText;
+  }
+  :focus-visible {
+    outline-color: Highlight !important;
+  }
+  /* let links, buttons, and accents honor the system highlight color */
+  a,
+  .assistant-apply-btn,
+  .dialog-btn--primary,
+  .topbar-labeled-btn {
+    color: LinkText;
   }
 }
 
@@ -1627,7 +1657,7 @@ button:focus-visible {
 
 @media (max-width: 760px) {
   .app-layout:not(.app-layout--collapsed) {
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: var(--sidebar-width-narrow) 1fr;
   }
 }
 

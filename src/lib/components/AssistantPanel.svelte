@@ -250,6 +250,7 @@
             title={nearLimit
               ? "Approaching the context limit — older messages will start dropping"
               : "Context size after the last turn"}
+            aria-label={`${nearLimit ? "Approaching the context limit — " : "Context size: "}about ${contextTokens.toLocaleString()} tokens`}
           >
             ~{contextTokens.toLocaleString()} tokens
           </span>
@@ -299,6 +300,7 @@
             <div
               class="assistant-msg-usage"
               title="Tokens used — {msg.inputTokens} input, {msg.outputTokens} output"
+              aria-label={`Tokens used — ${msg.inputTokens.toLocaleString()} input, ${(msg.outputTokens ?? 0).toLocaleString()} output`}
             >
               {(msg.inputTokens + (msg.outputTokens ?? 0)).toLocaleString()} tokens
             </div>

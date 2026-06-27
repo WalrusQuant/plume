@@ -85,13 +85,20 @@
   onOverlayClick={requestClose}
 >
   <div class="dialog-body">
+    <label class="sr-only" for="idea-title">Title (optional)</label>
     <input
+      id="idea-title"
       class="dialog-input"
       type="text"
       bind:value={title}
       placeholder="Title (optional)"
     />
+    {#if mode === "edit" && !title.trim()}
+      <p class="idea-title-hint">Leave blank to use the first line as the name.</p>
+    {/if}
+    <label class="sr-only" for="idea-body">Idea</label>
     <textarea
+      id="idea-body"
       class="dialog-textarea"
       bind:value={body}
       placeholder="Capture a quick idea…"
@@ -116,6 +123,11 @@
     margin-right: auto;
     align-self: center;
     font-size: 11.5px;
+    color: var(--text-tertiary);
+  }
+  .idea-title-hint {
+    margin: -6px 0 10px;
+    font-size: 11px;
     color: var(--text-tertiary);
   }
 </style>
