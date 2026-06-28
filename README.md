@@ -95,7 +95,6 @@ Notes for development builds:
 
 ## Project docs
 
-- `tasks/todo.md` — spec, milestone history, decisions, and backlogs
 - `CLAUDE.md` — architecture map and conventions for AI-assisted development
 
 ## Roadmap
@@ -112,3 +111,8 @@ Direction: Plume is evolving from a pure distribution tool into a markdown
 workspace for **building in public** — plan a project, keep its build log, and
 turn that real work into quality posts in your voice. Output stays copy/paste +
 export; there is no publishing pipeline.
+
+## License
+
+Copyright 2026 Adam Wickwire. Free and open source under the
+[Apache License 2.0](LICENSE).
