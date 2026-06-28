@@ -4,13 +4,11 @@ Local-first Tauri v2 desktop markdown writing app with an AI writing partner
 and per-platform export. Audience: content creators who write in markdown and
 publish to many places (blogs, newsletters, LinkedIn, X).
 
-**Read first:** `tasks/product-direction.md` — the current north star (a
-2026-06-10 pivot toward a "build in public" writing workspace; publishing
-pipeline cut). Then `tasks/todo.md` — full spec, milestone history (v1 =
-M0–M6), resolved decisions, and backlogs; `tasks/polish-backlog.md` — the
-v2-polish work (Phases A–C all shipped). `tasks/lessons.md` holds correction
-rules; review before making changes. (`tasks/v2-roadmap.md` is a historical
-shipped-record — its distribution-first framing is superseded.)
+**Direction:** Plume has pivoted toward a "build in public" writing workspace
+(the publishing pipeline was cut). Internal planning/strategy notes (product
+direction, spec + milestone history, correction rules) are kept locally and
+are **not** part of the public repo — this file plus the code are the source
+of truth for contributors.
 
 ## Stack
 
