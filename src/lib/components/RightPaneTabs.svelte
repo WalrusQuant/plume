@@ -1,5 +1,5 @@
 <script lang="ts">
-  export type RightPaneTab = "preview" | "assistant" | "history";
+  export type RightPaneTab = "preview" | "assistant" | "history" | "cheatsheet";
 
   interface Props {
     activeTab: RightPaneTab;
@@ -12,6 +12,7 @@
     { id: "preview", label: "Preview" },
     { id: "assistant", label: "Assistant" },
     { id: "history", label: "History" },
+    { id: "cheatsheet", label: "Guide" },
   ];
 
   function onKeydown(e: KeyboardEvent) {

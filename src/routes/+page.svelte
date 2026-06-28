@@ -19,6 +19,7 @@
   import RightPaneTabs, { type RightPaneTab } from "$lib/components/RightPaneTabs.svelte";
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
   import HistoryPanel from "$lib/components/HistoryPanel.svelte";
+  import CheatsheetPanel from "$lib/components/CheatsheetPanel.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import Toasts from "$lib/components/Toasts.svelte";
   import { assistant } from "$lib/assistant.svelte";
@@ -879,6 +880,10 @@
               onRestore={(id) => run(restoreSnapshot(id), "Restore")}
               getSnapshotContent={(id) => api.getSnapshotContent(id)}
             />
+            </div>
+          {:else if rightTab === "cheatsheet"}
+            <div id="right-panel-cheatsheet" role="tabpanel" aria-labelledby="right-tab-cheatsheet" class="preview-panel-body">
+            <CheatsheetPanel />
             </div>
           {:else}
             <div id="right-panel-assistant" role="tabpanel" aria-labelledby="right-tab-assistant" class="preview-panel-body">
