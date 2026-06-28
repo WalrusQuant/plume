@@ -44,7 +44,11 @@
     }
   });
 
+  // Re-check on every open (not just on provider change): otherwise reopening
+  // the dialog with the same provider keeps a stale hasSavedKey from before the
+  // key was saved, and the status line wrongly reads "No key saved".
   $effect(() => {
+    if (!open) return;
     const provider = formProvider;
     void api.hasApiKey(provider).then((has) => {
       if (provider === formProvider) hasSavedKey = has;
@@ -54,16 +58,22 @@
   function onProviderChange(provider: AIProvider) {
     formProvider = provider;
     formModel = DEFAULT_MODELS[provider];
+    // Drop any key typed for the previous provider so it can't be saved under
+    // the newly selected one. The status line re-checks for the new provider.
+    keyInput = "";
+    keyError = "";
   }
 
   async function save(e: Event) {
     e.preventDefault();
     keyError = "";
+    tavilyKeyError = "";
     // Snapshot the inputs BEFORE any await: updateSettings() mutates
     // assistant.settings, which re-runs the re-seed $effect and would clear the
     // bound key fields mid-save (the writes below would then see empty strings).
     const provider = formProvider;
-    const model = formModel.trim();
+    // An empty model would break the next API call — fall back to the default.
+    const model = formModel.trim() || DEFAULT_MODELS[provider];
     const voice = formVoice.trim();
     const newKey = keyInput.trim();
     const newTavilyKey = tavilyKeyInput.trim();
@@ -81,10 +91,9 @@
       if (newTavilyKey) {
         await assistant.saveTavilyKey(newTavilyKey);
       }
-      if (!assistant.isConfigured) {
-        keyError = "Enter an API key for this provider to use the assistant.";
-        return;
-      }
+      // Saving settings/keys always succeeds on its own — a missing provider key
+      // only means the assistant can't chat yet, which the status line already
+      // states. Never block the save or show an error for it.
       keyInput = "";
       tavilyKeyInput = "";
       toast.show("Settings saved", "info");
@@ -123,7 +132,7 @@
 </script>
 
 <Dialog {open} title="Settings" {onClose}>
-  <form class="dialog-body" onsubmit={save}>
+  <form id="settings-form" class="dialog-body" onsubmit={save}>
         <label class="dialog-label" for="settings-provider">AI provider</label>
         <div class="assistant-provider-row" id="settings-provider">
           <button
@@ -229,7 +238,7 @@
   {#snippet footer()}
     <div class="dialog-footer">
       <button type="button" class="dialog-btn dialog-btn--secondary" onclick={onClose}>Cancel</button>
-      <button type="submit" class="dialog-btn dialog-btn--primary">Save</button>
+      <button type="submit" form="settings-form" class="dialog-btn dialog-btn--primary">Save</button>
     </div>
   {/snippet}
 </Dialog>
