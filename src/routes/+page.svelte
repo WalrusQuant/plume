@@ -4,6 +4,7 @@
   import type { EditorView } from "@codemirror/view";
   import { api, type DocType, type Document, type Folder } from "$lib/api";
   import { getTemplate } from "$lib/templates";
+  import { WELCOME_DOC_TITLE, WELCOME_DOC_BODY } from "$lib/welcomeDoc";
   import type { Theme } from "$lib/editor/themes";
   import Editor from "$lib/components/Editor.svelte";
   import Toolbar from "$lib/components/Toolbar.svelte";
@@ -37,6 +38,8 @@
   const SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
   const THEME_KEY = "markdown-theme";
   const FOCUS_KEY = "markdown-focus-mode";
+  // First-run guard: seed the welcome doc once, never again (even if deleted).
+  const WELCOME_SEEDED_KEY = "markdown-welcome-seeded";
 
   let documents = $state<Document[]>([]);
   let folders = $state<Folder[]>([]);
@@ -713,7 +716,16 @@
           api.listFolders(),
           api.listExportTargets(),
         ]);
-        // no auto-select: boot lands on the home shelf
+        // First run on an empty library: seed the welcome/demo doc and open it
+        // so a new user lands on real content. The flag is set unconditionally
+        // so we never re-seed (an existing library just gets flagged, no doc).
+        if (!localStorage.getItem(WELCOME_SEEDED_KEY)) {
+          localStorage.setItem(WELCOME_SEEDED_KEY, "1");
+          if (documents.length === 0 && folders.length === 0) {
+            await createDocument(WELCOME_DOC_TITLE, "generic", WELCOME_DOC_BODY);
+          }
+        }
+        // otherwise no auto-select: boot lands on the home shelf
       } catch (e) {
         toast.error(`Loading documents failed: ${formatError(e)}`);
       }
