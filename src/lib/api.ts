@@ -183,6 +183,7 @@ export const api = {
     documentContent: string,
     references: DocReference[],
     webSearch: boolean,
+    searchNotes: boolean,
     voice: string | null,
   ) =>
     invoke<void>("send_assistant_message", {
@@ -193,6 +194,7 @@ export const api = {
       documentContent,
       references,
       webSearch,
+      searchNotes,
       voice,
     }),
   sendInlineEdit: (

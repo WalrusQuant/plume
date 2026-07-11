@@ -393,6 +393,7 @@ pub fn send_assistant_message(
     document_content: String,
     references: Vec<DocReference>,
     web_search: bool,
+    search_notes: bool,
     voice: Option<String>,
 ) -> Result<()> {
     ai::start_stream(
@@ -405,6 +406,7 @@ pub fn send_assistant_message(
         document_content,
         references,
         web_search,
+        search_notes,
         voice,
     )
 }

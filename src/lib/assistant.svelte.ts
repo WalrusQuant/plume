@@ -25,6 +25,10 @@ export interface AISettings {
   voice: string;
   /** When on, chat may call the Tavily web_search tool (requires a Tavily key). */
   webSearch: boolean;
+  /** When on, chat may call the search_notes tool (semantic search over the
+      user's own docs). Needs no key. Off by default so extended thinking stays
+      on unless the user opts into notes search this thread. */
+  searchNotes: boolean;
 }
 
 function loadSettings(): AISettings {
@@ -33,6 +37,7 @@ function loadSettings(): AISettings {
     model: DEFAULT_MODELS.anthropic,
     voice: "",
     webSearch: false,
+    searchNotes: false,
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -354,6 +359,7 @@ class AssistantStore {
         documentContent,
         references,
         this.settings.webSearch,
+        this.settings.searchNotes,
         this.settings.voice || null,
       );
       this.resetIdleTimer();
@@ -428,6 +434,16 @@ class AssistantStore {
     const next = !this.settings.webSearch;
     if (next && !this.hasTavilyKey) return false;
     await this.updateSettings({ ...this.settings, webSearch: next });
+    return next;
+  }
+
+  /** Toggle notes search (semantic search over the user's own docs). No key
+      required. Turning it on for a thread accepts no extended thinking that
+      turn (tools and thinking are mutually exclusive), matching web search.
+      Returns whether it is now on. */
+  async toggleNotesSearch(): Promise<boolean> {
+    const next = !this.settings.searchNotes;
+    await this.updateSettings({ ...this.settings, searchNotes: next });
     return next;
   }
 }

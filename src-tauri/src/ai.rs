@@ -80,6 +80,36 @@ fn web_search_tool_openai() -> serde_json::Value {
     })
 }
 
+/// The `search_notes` tool: semantic retrieval over the user's own corpus (the
+/// local chunk index). Unlike `web_search` it needs no API key. Same single
+/// `query` schema, shared by both provider wire formats via `search_notes_tool_*`.
+const SEARCH_NOTES_TOOL_NAME: &str = "search_notes";
+const SEARCH_NOTES_TOOL_DESC: &str = "Search the user's own notes and documents \
+    (their personal corpus in this app) by meaning, not keywords. Returns the most \
+    relevant passages, each labeled with its document title. Use it whenever the \
+    user asks about what they have written, their past notes, or refers to \
+    'my notes/docs/writing' — then ground your answer in the returned passages and \
+    name the documents you drew from.";
+
+fn search_notes_tool_anthropic() -> serde_json::Value {
+    json!({
+        "name": SEARCH_NOTES_TOOL_NAME,
+        "description": SEARCH_NOTES_TOOL_DESC,
+        "input_schema": web_search_input_schema(),
+    })
+}
+
+fn search_notes_tool_openai() -> serde_json::Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": SEARCH_NOTES_TOOL_NAME,
+            "description": SEARCH_NOTES_TOOL_DESC,
+            "parameters": web_search_input_schema(),
+        },
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
@@ -308,6 +338,22 @@ fn web_search_section(enabled: bool) -> String {
         .to_string()
 }
 
+/// Guidance appended when notes search is enabled: steers the model to ground
+/// answers about the user's own writing in the `search_notes` tool and to name
+/// the documents it draws from. Empty when disabled (byte-identical prompt).
+fn notes_search_section(enabled: bool) -> String {
+    if !enabled {
+        return String::new();
+    }
+    "\n\nYour notes — you have a `search_notes` tool that searches the user's own \
+     documents in this app by meaning. Use it whenever the user asks about what they \
+     have written, their past notes, or something that likely lives in their own \
+     corpus rather than in the open document above. Ground your answer in the returned \
+     passages and name the documents you used; if nothing relevant comes back, say so \
+     instead of inventing."
+        .to_string()
+}
+
 /// Chat system prompt. The model is a writing partner with the live document as
 /// context; revisions of the whole doc come back in a ```markdown block so the
 /// UI can apply them in one click. `references` are @-mentioned docs added as
@@ -317,6 +363,7 @@ fn system_prompt(
     document_content: &str,
     references: &[DocReference],
     web_search: bool,
+    search_notes: bool,
     voice: Option<&str>,
 ) -> String {
     format!(
@@ -326,9 +373,10 @@ fn system_prompt(
          review, improve, or generate content. Be concise and direct. When you propose a \
          revised version of the whole document, give the complete markdown in a \
          ```markdown code block so it can be applied in one click.\n\n\
-         Current document content:\n---\n{document_content}\n---{references}{web}{voice}",
+         Current document content:\n---\n{document_content}\n---{references}{web}{notes}{voice}",
         references = references_section(references),
         web = web_search_section(web_search),
+        notes = notes_search_section(search_notes),
         voice = voice_section(voice)
     )
 }
@@ -447,7 +495,7 @@ pub fn start_expand_stream(
         raw_content: None,
     }];
     // one-shot generation — no caching, no compaction (no history)
-    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false)
+    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false, false)
 }
 
 /// Adapt a finished document into a platform-native draft of `target`, streaming
@@ -476,7 +524,7 @@ pub fn start_content_multiply_stream(
         raw_content: None,
     }];
     // one-shot generation — no caching, no compaction (no history)
-    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false)
+    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false, false)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -490,18 +538,23 @@ pub fn start_stream(
     document_content: String,
     references: Vec<DocReference>,
     web_search: bool,
+    search_notes: bool,
     voice: Option<String>,
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
         .unwrap_or_else(|| provider.default_model().to_string());
-    let system = system_prompt(&document_content, &references, web_search, voice.as_deref());
+    let system =
+        system_prompt(&document_content, &references, web_search, search_notes, voice.as_deref());
     // chat: the system prefix (instructions + document) is re-sent every turn —
     // cache it so unchanged-document follow-ups read back at ~0.1× input price.
     // Enable server-side compaction so a long master chat stays bounded without
     // hard-dropping context (Anthropic + supported model only).
     let compact = provider == Provider::Anthropic && supports_compaction(&model);
-    run_stream(app, state, stream_id, provider, model, system, messages, true, compact, web_search)
+    run_stream(
+        app, state, stream_id, provider, model, system, messages, true, compact, web_search,
+        search_notes,
+    )
 }
 
 /// Start an inline edit: apply `instruction` to `selected_text`, streaming the
@@ -528,7 +581,7 @@ pub fn start_inline_stream(
     let messages =
         vec![ChatMessage { role: "user".into(), content: instruction, raw_content: None }];
     // one-shot edit — don't pay the cache-write premium on a single-use prompt
-    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false)
+    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false, false)
 }
 
 /// Shared driver: load the key, abort any in-flight stream, then spawn the
@@ -549,6 +602,7 @@ fn run_stream(
     cache_system: bool,
     compact: bool,
     web_search: bool,
+    search_notes: bool,
 ) -> Result<()> {
     let Some(api_key) = get_api_key(&app, provider)? else {
         return Err(Error::InvalidInput("no API key configured".into()));
@@ -585,6 +639,7 @@ fn run_stream(
                     cache_system,
                     compact,
                     tavily_key,
+                    search_notes,
                 )
                 .await
             }
@@ -597,6 +652,7 @@ fn run_stream(
                     messages,
                     &system,
                     tavily_key,
+                    search_notes,
                 )
                 .await
             }
@@ -795,6 +851,94 @@ async fn run_web_search(tavily_key: &str, query: &str) -> String {
     }
 }
 
+/// How many note chunks to feed back per `search_notes` call (plan D13).
+const NOTE_SEARCH_TOP_K: usize = 6;
+
+/// Run one `search_notes` call: embed the query, brute-force cosine-rank every
+/// indexed chunk, and return the top-K as a tool-result block. Grabs the shared
+/// embedder + DB from Tauri state. Like `run_web_search`, every failure becomes
+/// a result string (never a hard error) so the model can recover or explain.
+async fn run_semantic_search(app: &AppHandle, query: &str) -> String {
+    use crate::embed::Embedder;
+    use tauri::Manager;
+    let Some(embed_state) = app.try_state::<crate::embed::EmbedState>() else {
+        return "Note search is unavailable.".to_string();
+    };
+    let embedder = embed_state.embedder.clone();
+
+    // Embed the query off the async reactor (CPU-blocking; may lazy-load the model).
+    let owned = query.to_string();
+    let qvec = match tokio::task::spawn_blocking(move || embedder.embed_query(&owned)).await {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => return format!("Note search for \"{query}\" failed: {e}"),
+        Err(e) => return format!("Note search for \"{query}\" failed: {e}"),
+    };
+
+    // Load all chunk vectors (owned) under a brief DB lock, then rank in memory.
+    let Some(db) = app.try_state::<crate::commands::Db>() else {
+        return "Note search is unavailable.".to_string();
+    };
+    let chunks = {
+        let conn = db.0.lock().expect("db mutex poisoned");
+        match crate::storage::all_chunk_embeddings(&conn) {
+            Ok(c) => c,
+            Err(e) => return format!("Note search for \"{query}\" failed: {e}"),
+        }
+    };
+    if chunks.is_empty() {
+        return "No notes indexed yet — the user has no searchable documents.".to_string();
+    }
+
+    let mut scored: Vec<(f32, &crate::storage::ChunkVec)> = chunks
+        .iter()
+        .map(|c| (crate::embed::cosine(&qvec, &c.embedding), c))
+        .collect();
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut out = format!("Notes search results for \"{query}\":\n");
+    for (i, (_score, c)) in scored.iter().take(NOTE_SEARCH_TOP_K).enumerate() {
+        out.push_str(&format!(
+            "\n[{n}] \"{name}\"\n{content}\n",
+            n = i + 1,
+            name = c.doc_name,
+            content = c.content,
+        ));
+    }
+    out
+}
+
+/// Dispatch one tool call by name, emitting the matching status line. Shared by
+/// both provider loops so web/notes routing stays identical across providers.
+/// A failure or unknown tool returns a result string, never an error.
+async fn run_tool(
+    app: &AppHandle,
+    stream_id: &str,
+    tool_name: &str,
+    query: &str,
+    tavily_key: Option<&str>,
+) -> String {
+    match tool_name {
+        WEB_SEARCH_TOOL_NAME => {
+            let _ = app.emit(
+                EVT_STATUS,
+                json!({ "id": stream_id, "message": format!("Searching the web: {query}") }),
+            );
+            match tavily_key {
+                Some(key) => run_web_search(key, query).await,
+                None => "Web search is unavailable (no Tavily key).".to_string(),
+            }
+        }
+        SEARCH_NOTES_TOOL_NAME => {
+            let _ = app.emit(
+                EVT_STATUS,
+                json!({ "id": stream_id, "message": format!("Searching your notes: {query}") }),
+            );
+            run_semantic_search(app, query).await
+        }
+        other => format!("Unknown tool \"{other}\"."),
+    }
+}
+
 /// Models that support both adaptive thinking and server-side context compaction.
 /// The two capability sets currently coincide; kept as one constant so they
 /// can't drift. When a future model supports one but not the other, split into
@@ -857,12 +1001,12 @@ fn cache_last_compaction(messages: &mut [serde_json::Value]) {
 /// turn and reads back at ~0.1× when the document is unchanged. One-shot paths
 /// (inline edit / expand / multiply) pass `false`: a single-use prompt would
 /// only pay the ~1.25× write premium with nothing to read it back. `compact`
-/// turns on server-side context compaction (chat only). `web_search` adds the
-/// `web_search` tool and, because tool turns are replayed without the signed
-/// thinking blocks that adaptive thinking would require, omits the `thinking`
-/// field for the turn (a deliberate v1 simplification — search turns don't use
-/// extended thinking). `messages` already includes any loop-local tool_use /
-/// tool_result turns (carried as `raw_content`).
+/// turns on server-side context compaction (chat only). `web_search` /
+/// `search_notes` each add their tool; when ANY tool is offered the `thinking`
+/// field is omitted for the turn (adaptive thinking and tool use are mutually
+/// exclusive, and tool turns are replayed without the signed thinking blocks
+/// thinking would require — a deliberate v1 simplification). `messages` already
+/// includes any loop-local tool_use / tool_result turns (carried as `raw_content`).
 fn anthropic_request_body(
     model: &str,
     messages: &[ChatMessage],
@@ -870,6 +1014,7 @@ fn anthropic_request_body(
     cache_system: bool,
     compact: bool,
     web_search: bool,
+    search_notes: bool,
 ) -> serde_json::Value {
     let system_field = if cache_system {
         json!([{ "type": "text", "text": system, "cache_control": { "type": "ephemeral" } }])
@@ -886,9 +1031,17 @@ fn anthropic_request_body(
         "messages": messages_json,
         "stream": true,
     });
-    // adaptive thinking and web search are mutually exclusive per turn — see doc
+    // adaptive thinking and tool use are mutually exclusive per turn — see doc.
+    // Offer whichever tools are enabled; thinking only when no tool is offered.
+    let mut tools: Vec<serde_json::Value> = Vec::new();
     if web_search {
-        body["tools"] = json!([web_search_tool_anthropic()]);
+        tools.push(web_search_tool_anthropic());
+    }
+    if search_notes {
+        tools.push(search_notes_tool_anthropic());
+    }
+    if !tools.is_empty() {
+        body["tools"] = json!(tools);
     } else if supports_adaptive_thinking(model) {
         body["thinking"] = json!({"type": "adaptive"});
     }
@@ -937,6 +1090,7 @@ async fn stream_anthropic(
     cache_system: bool,
     compact: bool,
     tavily_key: Option<String>,
+    search_notes: bool,
 ) -> Result<()> {
     let web_search = tavily_key.is_some();
     let mut convo = messages; // loop appends loop-local tool_use / tool_result turns
@@ -946,9 +1100,16 @@ async fn stream_anthropic(
     let mut searches = 0;
 
     loop {
-        let allow_tools = web_search && searches < MAX_SEARCH_ROUNDS;
-        let body =
-            anthropic_request_body(model, &convo, system, cache_system, compact, allow_tools);
+        let allow_tools = (web_search || search_notes) && searches < MAX_SEARCH_ROUNDS;
+        let body = anthropic_request_body(
+            model,
+            &convo,
+            system,
+            cache_system,
+            compact,
+            allow_tools && web_search,
+            allow_tools && search_notes,
+        );
         let mut request = http_client()
             .post(ANTHROPIC_URL)
             .header("x-api-key", api_key)
@@ -966,9 +1127,9 @@ async fn stream_anthropic(
 
         let searching = round.stop_reason.as_deref() == Some("tool_use")
             && !round.tool_uses.is_empty();
-        let Some(key) = tavily_key.as_deref().filter(|_| allow_tools && searching) else {
+        if !(allow_tools && searching) {
             break;
-        };
+        }
 
         // Replay the assistant turn (text + tool_use blocks) verbatim so the
         // tool_use ids line up with the results we send back.
@@ -984,11 +1145,7 @@ async fn stream_anthropic(
             assistant_blocks.push(json!({
                 "type": "tool_use", "id": tu.id, "name": tu.name, "input": input,
             }));
-            let _ = app.emit(
-                EVT_STATUS,
-                json!({ "id": stream_id, "message": format!("Searching the web: {query}") }),
-            );
-            let result = run_web_search(key, &query).await;
+            let result = run_tool(app, stream_id, &tu.name, &query, tavily_key.as_deref()).await;
             result_blocks.push(json!({
                 "type": "tool_result", "tool_use_id": tu.id, "content": result,
             }));
@@ -1138,6 +1295,7 @@ async fn stream_openrouter(
     messages: Vec<ChatMessage>,
     system: &str,
     tavily_key: Option<String>,
+    search_notes: bool,
 ) -> Result<()> {
     let web_search = tavily_key.is_some();
     let mut convo: Vec<serde_json::Value> = vec![json!({ "role": "system", "content": system })];
@@ -1157,7 +1315,7 @@ async fn stream_openrouter(
     let mut searches = 0;
 
     loop {
-        let allow_tools = web_search && searches < MAX_SEARCH_ROUNDS;
+        let allow_tools = (web_search || search_notes) && searches < MAX_SEARCH_ROUNDS;
         let mut body = json!({
             "model": model,
             "messages": convo,
@@ -1165,8 +1323,15 @@ async fn stream_openrouter(
             // ask for a final usage chunk (OpenAI-compatible streaming option)
             "stream_options": { "include_usage": true },
         });
-        if allow_tools {
-            body["tools"] = json!([web_search_tool_openai()]);
+        let mut tools: Vec<serde_json::Value> = Vec::new();
+        if allow_tools && web_search {
+            tools.push(web_search_tool_openai());
+        }
+        if allow_tools && search_notes {
+            tools.push(search_notes_tool_openai());
+        }
+        if !tools.is_empty() {
+            body["tools"] = json!(tools);
             body["tool_choice"] = json!("auto");
         }
         let request = client
@@ -1180,10 +1345,9 @@ async fn stream_openrouter(
         let round = stream_openrouter_round(app, stream_id, request).await?;
         usage.update(round.usage.input, round.usage.output);
 
-        let Some(key) = tavily_key.as_deref().filter(|_| allow_tools && !round.tool_calls.is_empty())
-        else {
+        if !(allow_tools && !round.tool_calls.is_empty()) {
             break;
-        };
+        }
 
         // assistant turn carrying the tool_calls (content may be null)
         let tool_calls_json: Vec<serde_json::Value> = round
@@ -1206,11 +1370,7 @@ async fn stream_openrouter(
             let args: serde_json::Value =
                 serde_json::from_str(&tc.arguments).unwrap_or_else(|_| json!({}));
             let query = args["query"].as_str().unwrap_or_default().to_string();
-            let _ = app.emit(
-                EVT_STATUS,
-                json!({ "id": stream_id, "message": format!("Searching the web: {query}") }),
-            );
-            let result = run_web_search(key, &query).await;
+            let result = run_tool(app, stream_id, &tc.name, &query, tavily_key.as_deref()).await;
             convo.push(json!({ "role": "tool", "tool_call_id": tc.id, "content": result }));
         }
         searches += 1;
@@ -1310,20 +1470,23 @@ mod tests {
             vec![ChatMessage { role: "user".into(), content: "hi".into(), raw_content: None }];
 
         // chat path: the system prompt is wrapped in a cached content block
-        let cached = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, false);
+        let cached =
+            anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, false, false);
         assert!(cached["system"].is_array(), "cached system must be a content-block array");
         assert_eq!(cached["system"][0]["text"], "SYS");
         assert_eq!(cached["system"][0]["cache_control"]["type"], "ephemeral");
 
         // one-shot paths: plain string system, no cache-write premium
-        let plain = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", false, false, false);
+        let plain =
+            anthropic_request_body("claude-opus-4-8", &msgs, "SYS", false, false, false, false);
         assert!(plain["system"].is_string());
         assert_eq!(plain["system"], "SYS");
         assert!(plain["system"][0]["cache_control"].is_null());
 
         // caching is orthogonal to the existing model-gated thinking field
         assert_eq!(cached["thinking"]["type"], "adaptive");
-        let haiku = anthropic_request_body("claude-haiku-4-5", &msgs, "SYS", false, false, false);
+        let haiku =
+            anthropic_request_body("claude-haiku-4-5", &msgs, "SYS", false, false, false, false);
         assert!(haiku.get("thinking").is_none());
     }
 
@@ -1341,9 +1504,11 @@ mod tests {
         // context_management only present when compaction is requested
         let plain_msgs =
             vec![ChatMessage { role: "user".into(), content: "hi".into(), raw_content: None }];
-        let off = anthropic_request_body("claude-opus-4-8", &plain_msgs, "SYS", true, false, false);
+        let off =
+            anthropic_request_body("claude-opus-4-8", &plain_msgs, "SYS", true, false, false, false);
         assert!(off.get("context_management").is_none());
-        let on = anthropic_request_body("claude-opus-4-8", &plain_msgs, "SYS", true, true, false);
+        let on =
+            anthropic_request_body("claude-opus-4-8", &plain_msgs, "SYS", true, true, false, false);
         assert_eq!(on["context_management"]["edits"][0]["type"], "compact_20260112");
         // a plain message stays a string
         assert_eq!(on["messages"][0]["content"], "hi");
@@ -1359,7 +1524,8 @@ mod tests {
             content: "reply".into(),
             raw_content: Some(blocks),
         }];
-        let body = anthropic_request_body("claude-opus-4-8", &with_blocks, "SYS", true, true, false);
+        let body =
+            anthropic_request_body("claude-opus-4-8", &with_blocks, "SYS", true, true, false, false);
         let content = &body["messages"][0]["content"];
         assert!(content.is_array());
         assert_eq!(content[0]["type"], "compaction");
@@ -1385,7 +1551,8 @@ mod tests {
             ChatMessage { role: "user".into(), content: "more".into(), raw_content: None },
             turn("newer"),
         ];
-        let body = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, true, false);
+        let body =
+            anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, true, false, false);
         // older compaction: NOT cached
         assert!(body["messages"][0]["content"][0]["cache_control"].is_null());
         // newest compaction: cached
@@ -1514,7 +1681,7 @@ mod tests {
     #[test]
     fn voice_injected_into_all_surfaces_when_set() {
         let v = Some("terse, lowercase, dry wit");
-        assert!(system_prompt("doc", &[], false, v).contains("terse, lowercase, dry wit"));
+        assert!(system_prompt("doc", &[], false, false, v).contains("terse, lowercase, dry wit"));
         assert!(inline_system_prompt("doc", "sel", v).contains("terse, lowercase, dry wit"));
         assert!(expand_system_prompt("idea", "Blog Post", v).contains("terse, lowercase, dry wit"));
         assert!(
@@ -1526,8 +1693,8 @@ mod tests {
     #[test]
     fn voice_absent_when_unset_or_blank() {
         // None and whitespace both yield no voice section
-        assert!(!system_prompt("doc", &[], false, None).contains("Voice & tone"));
-        assert!(!system_prompt("doc", &[], false, Some("   ")).contains("Voice & tone"));
+        assert!(!system_prompt("doc", &[], false, false, None).contains("Voice & tone"));
+        assert!(!system_prompt("doc", &[], false, false, Some("   ")).contains("Voice & tone"));
     }
 
     #[test]
@@ -1543,7 +1710,7 @@ mod tests {
     #[test]
     fn references_absent_when_empty_unchanged_prompt() {
         // no @-mentions → byte-identical to the pre-feature prompt
-        assert!(!system_prompt("doc", &[], false, None).contains("Referenced"));
+        assert!(!system_prompt("doc", &[], false, false, None).contains("Referenced"));
     }
 
     #[test]
@@ -1552,7 +1719,7 @@ mod tests {
             name: "Pricing notes".into(),
             content: "we charge $9/mo".into(),
         }];
-        let prompt = system_prompt("the live doc", &refs, false, Some("terse and dry"));
+        let prompt = system_prompt("the live doc", &refs, false, false, Some("terse and dry"));
         // reference content is present and labeled
         assert!(prompt.contains("Referenced: \"Pricing notes\""));
         assert!(prompt.contains("we charge $9/mo"));
@@ -1567,13 +1734,13 @@ mod tests {
     fn web_search_section_only_when_enabled_and_asks_for_citations() {
         // disabled → byte-identical prompt (no section)
         assert!(web_search_section(false).is_empty());
-        assert!(!system_prompt("doc", &[], false, None).contains("web_search"));
+        assert!(!system_prompt("doc", &[], false, false, None).contains("web_search"));
         // enabled → mentions the tool and the inline-link citation rule
         let section = web_search_section(true);
         assert!(section.contains("web_search"));
         assert!(section.to_lowercase().contains("markdown link"));
         // injected into the chat prompt after the document, before voice
-        let prompt = system_prompt("the doc body", &[], true, Some("dry wit"));
+        let prompt = system_prompt("the doc body", &[], true, false, Some("dry wit"));
         let doc = prompt.find("the doc body").unwrap();
         let web = prompt.find("web_search").unwrap();
         let voice = prompt.find("Voice & tone").unwrap();
@@ -1587,13 +1754,13 @@ mod tests {
 
         // web search on: the tool is present and thinking is omitted (even on a
         // model that would otherwise get adaptive thinking)
-        let on = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, true);
+        let on = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, true, false);
         assert_eq!(on["tools"][0]["name"], WEB_SEARCH_TOOL_NAME);
         assert_eq!(on["tools"][0]["input_schema"]["properties"]["query"]["type"], "string");
         assert!(on.get("thinking").is_none(), "thinking must be omitted on search turns");
 
         // web search off: no tool, thinking restored
-        let off = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, false);
+        let off = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, false, false);
         assert!(off.get("tools").is_none());
         assert_eq!(off["thinking"]["type"], "adaptive");
     }
@@ -1605,5 +1772,44 @@ mod tests {
         assert_eq!(tool["function"]["name"], WEB_SEARCH_TOOL_NAME);
         // OpenAI nests the schema under `parameters` (Anthropic uses input_schema)
         assert_eq!(tool["function"]["parameters"]["required"][0], "query");
+    }
+
+    #[test]
+    fn anthropic_body_composes_both_tools_and_gates_thinking() {
+        let msgs =
+            vec![ChatMessage { role: "user".into(), content: "hi".into(), raw_content: None }];
+
+        // notes only: search_notes tool present, no web tool, thinking omitted
+        let notes = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, false, true);
+        assert_eq!(notes["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(notes["tools"][0]["name"], SEARCH_NOTES_TOOL_NAME);
+        assert!(notes.get("thinking").is_none(), "any tool omits thinking");
+
+        // both on: two tools offered
+        let both = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, true, true);
+        let names: Vec<&str> = both["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&WEB_SEARCH_TOOL_NAME));
+        assert!(names.contains(&SEARCH_NOTES_TOOL_NAME));
+
+        // neither: thinking restored on a capable model
+        let none = anthropic_request_body("claude-opus-4-8", &msgs, "SYS", true, false, false, false);
+        assert!(none.get("tools").is_none());
+        assert_eq!(none["thinking"]["type"], "adaptive");
+    }
+
+    #[test]
+    fn search_notes_tool_definitions_shape() {
+        let a = search_notes_tool_anthropic();
+        assert_eq!(a["name"], SEARCH_NOTES_TOOL_NAME);
+        assert_eq!(a["input_schema"]["required"][0], "query");
+        let o = search_notes_tool_openai();
+        assert_eq!(o["type"], "function");
+        assert_eq!(o["function"]["name"], SEARCH_NOTES_TOOL_NAME);
+        assert_eq!(o["function"]["parameters"]["required"][0], "query");
     }
 }
