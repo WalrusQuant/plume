@@ -4,6 +4,7 @@ use rusqlite::Connection;
 use tauri::{AppHandle, State};
 
 use crate::ai::{self, AiState, ChatMessage, DocReference, Provider};
+use crate::embed::EmbedState;
 use crate::error::{Error, Result};
 use crate::export::{self, ExportOutput, ExportTarget};
 use crate::storage::{self, DocType, Document, Folder};
@@ -33,11 +34,14 @@ pub fn list_documents(db: State<Db>) -> Result<Vec<Document>> {
 #[tauri::command]
 pub fn create_document(
     db: State<Db>,
+    embed: State<EmbedState>,
     name: String,
     doc_type: Option<DocType>,
     content: Option<String>,
 ) -> Result<Document> {
-    db.with(|conn| storage::create_document(conn, &name, doc_type, content.as_deref()))
+    let doc = db.with(|conn| storage::create_document(conn, &name, doc_type, content.as_deref()))?;
+    let _ = embed.tx.try_send(());
+    Ok(doc)
 }
 
 #[tauri::command]
@@ -58,12 +62,16 @@ pub fn update_idea_name(
 #[tauri::command]
 pub fn update_document_type(
     db: State<Db>,
+    embed: State<EmbedState>,
     id: String,
     doc_type: DocType,
     name: String,
     explicit: bool,
 ) -> Result<Document> {
-    db.with(|conn| storage::update_document_type(conn, &id, doc_type, &name, explicit))
+    // Promoting an idea to a real doc makes it eligible for indexing.
+    let doc = db.with(|conn| storage::update_document_type(conn, &id, doc_type, &name, explicit))?;
+    let _ = embed.tx.try_send(());
+    Ok(doc)
 }
 
 #[tauri::command]
@@ -82,8 +90,15 @@ pub fn get_document_content(db: State<Db>, id: String) -> Result<String> {
 }
 
 #[tauri::command]
-pub fn save_document_content(db: State<Db>, id: String, content: String) -> Result<()> {
-    db.with(|conn| storage::save_document_content(conn, &id, &content))
+pub fn save_document_content(
+    db: State<Db>,
+    embed: State<EmbedState>,
+    id: String,
+    content: String,
+) -> Result<()> {
+    db.with(|conn| storage::save_document_content(conn, &id, &content))?;
+    let _ = embed.tx.try_send(());
+    Ok(())
 }
 
 #[tauri::command]

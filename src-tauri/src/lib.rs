@@ -33,6 +33,22 @@ pub fn run() {
             storage::init(&conn)?;
             app.manage(Db(Mutex::new(conn)));
             app.manage(ai::AiState::default());
+
+            // Semantic notebook: a background worker keeps the chunk index in
+            // sync. It owns its own DB connection (never the Db mutex) and the
+            // one shared embedding model; writes nudge it via the channel.
+            let (tx, rx) = tokio::sync::mpsc::channel::<()>(8);
+            let embedder = std::sync::Arc::new(embed::FastEmbedder::new(data_dir.clone()));
+            app.manage(embed::EmbedState {
+                tx,
+                embedder: embedder.clone(),
+            });
+            tauri::async_runtime::spawn(embed::run_worker(
+                app.handle().clone(),
+                db_path.clone(),
+                embedder,
+                rx,
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

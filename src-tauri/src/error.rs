@@ -9,6 +9,7 @@ pub enum ErrorKind {
     InvalidInput,
     Sqlite,
     Io,
+    Embed,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +22,8 @@ pub enum Error {
     Sqlite(#[from] rusqlite::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error("embedding: {0}")]
+    Embed(String),
 }
 
 impl Error {
@@ -30,6 +33,7 @@ impl Error {
             Error::InvalidInput(_) => ErrorKind::InvalidInput,
             Error::Sqlite(_) => ErrorKind::Sqlite,
             Error::Io(_) => ErrorKind::Io,
+            Error::Embed(_) => ErrorKind::Embed,
         }
     }
 }

@@ -13,7 +13,13 @@
 //! is allowed module-wide.
 #![allow(dead_code)]
 
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
 use comrak::nodes::{AstNode, NodeValue};
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use rusqlite::Connection;
+use tauri::{AppHandle, Emitter};
 
 use crate::error::{Error, Result};
 
@@ -157,6 +163,165 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     } else {
         dot / (na * nb)
     }
+}
+
+/// bge wants a retrieval instruction on the query side only (plan D2); document
+/// chunks are embedded bare. fastembed does no auto-prefixing, so we prepend it.
+const QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
+
+/// The real fastembed-backed embedder. The ONNX model (bge-small int8, ~32 MB)
+/// is loaded lazily on first use — app startup never blocks and never fails
+/// offline; a first-run download failure just leaves docs dirty to retry. One
+/// shared session behind a `Mutex` (plan D3); every call runs on a blocking
+/// thread, never the async reactor.
+pub struct FastEmbedder {
+    cache_dir: PathBuf,
+    model: Mutex<Option<TextEmbedding>>,
+}
+
+impl FastEmbedder {
+    pub fn new(cache_dir: PathBuf) -> Self {
+        Self {
+            cache_dir,
+            model: Mutex::new(None),
+        }
+    }
+
+    /// True once the model has been loaded — lets the worker emit a one-time
+    /// "downloading" status before the first (potentially slow) load.
+    pub fn is_loaded(&self) -> bool {
+        self.model.lock().unwrap().is_some()
+    }
+
+    /// Run `f` with the lazily-initialized model. The first call downloads +
+    /// loads it (cache dir pinned to app data dir — plan D1, the crate default
+    /// is cwd-relative and wrong for a bundled `.app`); later calls reuse it.
+    fn with_model<T>(&self, f: impl FnOnce(&TextEmbedding) -> Result<T>) -> Result<T> {
+        let mut guard = self.model.lock().unwrap();
+        if guard.is_none() {
+            let opts = InitOptions::new(EmbeddingModel::BGESmallENV15Q)
+                .with_cache_dir(self.cache_dir.clone());
+            let model = TextEmbedding::try_new(opts)
+                .map_err(|e| Error::Embed(format!("load embedding model: {e}")))?;
+            *guard = Some(model);
+        }
+        f(guard.as_ref().expect("model just initialized"))
+    }
+}
+
+impl Embedder for FastEmbedder {
+    fn embed_passages(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.with_model(|model| {
+            let mut out = model
+                .embed(texts.to_vec(), None)
+                .map_err(|e| Error::Embed(format!("embed passages: {e}")))?;
+            for v in &mut out {
+                normalize(v);
+            }
+            Ok(out)
+        })
+    }
+
+    fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
+        self.with_model(|model| {
+            let mut out = model
+                .embed(vec![format!("{QUERY_PREFIX}{query}")], None)
+                .map_err(|e| Error::Embed(format!("embed query: {e}")))?;
+            let mut v = out
+                .pop()
+                .ok_or_else(|| Error::Embed("empty query embedding".into()))?;
+            normalize(&mut v);
+            Ok(v)
+        })
+    }
+}
+
+/// Shared state for the embed pipeline: `tx` nudges the worker after a write
+/// (managed like `Db`/`AiState`); `embedder` is the one shared model instance,
+/// reused by the chat query path in Slice 3 (hence `Arc`).
+pub struct EmbedState {
+    pub tx: tokio::sync::mpsc::Sender<()>,
+    pub embedder: Arc<FastEmbedder>,
+}
+
+const EVT_EMBED_STATUS: &str = "embed:status";
+
+/// Open the worker's own DB connection (plan D4): a second reader/writer on the
+/// WAL DB with a busy timeout, so a long backfill never touches the app's `Db`
+/// mutex and can't freeze the UI. Foreign keys on for the same cascade rules.
+fn open_worker_conn(db_path: &Path) -> Result<Connection> {
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;")?;
+    Ok(conn)
+}
+
+/// Background indexing loop. Runs one backfill at startup, then re-runs whenever
+/// a write signals (debounced to coalesce a burst). Fails soft: a bad pass logs
+/// and leaves docs dirty for the next signal, never panics the task.
+pub async fn run_worker(
+    app: AppHandle,
+    db_path: PathBuf,
+    embedder: Arc<FastEmbedder>,
+    mut rx: tokio::sync::mpsc::Receiver<()>,
+) {
+    loop {
+        if let Err(e) = process_pending(&app, &db_path, &embedder).await {
+            eprintln!("[embed] indexing pass failed (will retry): {e}");
+        }
+        // Block until the next write nudge; None = channel closed (shutdown).
+        if rx.recv().await.is_none() {
+            break;
+        }
+        // Coalesce a burst of edits into a single pass.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        while rx.try_recv().is_ok() {}
+    }
+}
+
+/// One indexing pass: embed every dirty document. Each doc is chunked, embedded
+/// on a blocking thread (CPU-bound — plan D3), and stored in its own tx.
+async fn process_pending(app: &AppHandle, db_path: &Path, embedder: &Arc<FastEmbedder>) -> Result<()> {
+    let conn = open_worker_conn(db_path)?;
+    let ids = crate::storage::docs_needing_embedding(&conn)?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    if !embedder.is_loaded() {
+        let _ = app.emit(EVT_EMBED_STATUS, "downloading");
+    }
+    for id in ids {
+        // Read content + its version together; the doc may have been deleted
+        // between the dirty-list query and now — skip it.
+        let Ok((content, updated_at)) = crate::storage::content_for_embedding(&conn, &id) else {
+            continue;
+        };
+        let texts = chunk_document(&content);
+        if texts.is_empty() {
+            // Nothing to embed (empty doc). Clear stale chunks and stamp the
+            // version so it isn't rescanned every pass.
+            crate::storage::replace_chunks(&conn, &id, &[], &updated_at)?;
+            continue;
+        }
+        let emb = embedder.clone();
+        let owned = texts.clone();
+        let vecs = tokio::task::spawn_blocking(move || emb.embed_passages(&owned))
+            .await
+            .map_err(|e| Error::Embed(format!("embed task join: {e}")))??;
+        let rows: Vec<(usize, &str, &[f32])> = texts
+            .iter()
+            .zip(&vecs)
+            .enumerate()
+            .map(|(i, (t, v))| (i, t.as_str(), v.as_slice()))
+            .collect();
+        // Stamp embedded_at to the version we embedded, not now() — an edit that
+        // landed during embedding will have a newer updated_at and re-dirty the doc.
+        crate::storage::replace_chunks(&conn, &id, &rows, &updated_at)?;
+    }
+    let _ = app.emit(EVT_EMBED_STATUS, "ready");
+    Ok(())
 }
 
 /// Deterministic, model-free `Embedder` for tests: a normalized bag-of-words

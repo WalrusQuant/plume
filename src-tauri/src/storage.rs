@@ -1005,16 +1005,20 @@ pub struct ChunkVec {
 }
 
 /// Replace all chunks for a document in one transaction: delete the old rows,
-/// insert `(ordinal, content, embedding)` in order, and stamp `embedded_at`.
-/// Embeddings are stored as the L2-normalized f32 BLOB the caller passes (the
-/// worker normalizes; see `embed::normalize`).
+/// insert `(ordinal, content, embedding)` in order, and stamp `embedded_at` to
+/// the version that was embedded. `embedded_at` MUST be the `updated_at` the
+/// caller read alongside the content (see `content_for_embedding`) — not
+/// wall-clock now — so an edit that lands mid-embed advances `updated_at` past
+/// the stamp and re-dirties the doc. Embeddings are stored as the L2-normalized
+/// f32 BLOB the caller passes (the worker normalizes; see `embed::normalize`).
 #[allow(dead_code)]
 pub fn replace_chunks(
     conn: &Connection,
     document_id: &str,
     chunks: &[(usize, &str, &[f32])],
+    embedded_at: &str,
 ) -> Result<()> {
-    let ts = now();
+    let created = now();
     let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM chunks WHERE document_id = ?1", [document_id])?;
     for (ordinal, content, embedding) in chunks {
@@ -1027,16 +1031,30 @@ pub fn replace_chunks(
                 *ordinal as i64,
                 content,
                 crate::embed::embedding_to_blob(embedding),
-                ts,
+                created,
             ],
         )?;
     }
     tx.execute(
         "UPDATE documents SET embedded_at = ?2 WHERE id = ?1",
-        rusqlite::params![document_id, ts],
+        rusqlite::params![document_id, embedded_at],
     )?;
     tx.commit()?;
     Ok(())
+}
+
+/// A document's content paired with its `updated_at`, read atomically so the
+/// worker can stamp `embedded_at` to exactly the version it embedded. Closes the
+/// embed-vs-save race (a concurrent edit advances `updated_at` past the stamp).
+#[allow(dead_code)]
+pub fn content_for_embedding(conn: &Connection, id: &str) -> Result<(String, String)> {
+    conn.query_row(
+        "SELECT content, updated_at FROM documents WHERE id = ?1",
+        [id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()?
+    .ok_or(Error::NotFound("document"))
 }
 
 /// Drop every chunk for a document (e.g. before a re-embed). Deleting the
@@ -1846,7 +1864,7 @@ mod tests {
         .unwrap();
 
         for doc in [&rust_doc, &bread_doc] {
-            let content = get_document_content(&conn, &doc.id).unwrap();
+            let (content, updated_at) = content_for_embedding(&conn, &doc.id).unwrap();
             let texts = embed::chunk_document(&content);
             assert!(!texts.is_empty());
             let vecs = embedder.embed_passages(&texts).unwrap();
@@ -1856,7 +1874,7 @@ mod tests {
                 .enumerate()
                 .map(|(i, (t, v))| (i, t.as_str(), v.as_slice()))
                 .collect();
-            replace_chunks(&conn, &doc.id, &rows).unwrap();
+            replace_chunks(&conn, &doc.id, &rows, &updated_at).unwrap();
         }
 
         // embedded_at got stamped; both docs leave the "needs embedding" set.
@@ -1892,5 +1910,27 @@ mod tests {
 
         let pending = docs_needing_embedding(&conn).unwrap();
         assert_eq!(pending.len(), 1, "only the non-idea doc is pending: {pending:?}");
+    }
+
+    /// The embed-vs-save race: stamping `embedded_at` to the embedded version
+    /// (not now()) means an edit that lands after we read the content — modeled
+    /// here by advancing `updated_at` past the stamp — leaves the doc dirty so
+    /// its new content gets re-embedded.
+    #[test]
+    fn edit_after_embed_re_dirties_the_doc() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Doc", None, Some("body")).unwrap();
+
+        // Embed the version we read (its updated_at) → doc is now clean.
+        replace_chunks(&conn, &doc.id, &[], &doc.updated_at).unwrap();
+        assert!(docs_needing_embedding(&conn).unwrap().is_empty());
+
+        // Simulate an edit that raced the embed: updated_at moves past the stamp.
+        conn.execute(
+            "UPDATE documents SET updated_at = '2999-01-01T00:00:00+00:00' WHERE id = ?1",
+            [&doc.id],
+        )
+        .unwrap();
+        assert_eq!(docs_needing_embedding(&conn).unwrap(), vec![doc.id]);
     }
 }
