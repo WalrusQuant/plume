@@ -199,7 +199,12 @@ impl FastEmbedder {
     fn with_model<T>(&self, f: impl FnOnce(&TextEmbedding) -> Result<T>) -> Result<T> {
         let mut guard = self.model.lock().unwrap();
         if guard.is_none() {
-            let opts = InitOptions::new(EmbeddingModel::BGESmallENV15Q)
+            // Non-quantized bge-small (fp32, ~127 MB). The int8 `BGESmallENV15Q`
+            // variant fails at inference under this bundled onnxruntime — its
+            // SkipLayerNormalization op is missing a LayerNorm weight input
+            // ("Missing Input: encoder.layer.0.attention.output.LayerNorm.weight").
+            // fp32 runs cleanly and gives slightly better retrieval anyway.
+            let opts = InitOptions::new(EmbeddingModel::BGESmallENV15)
                 .with_cache_dir(self.cache_dir.clone());
             let model = TextEmbedding::try_new(opts)
                 .map_err(|e| Error::Embed(format!("load embedding model: {e}")))?;
