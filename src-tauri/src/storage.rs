@@ -244,6 +244,20 @@ const MIGRATIONS: &[&str] = &[
     // replay (the Anthropic API drops everything before the compaction block).
     // NULL for every existing row and for plain text/user turns.
     "ALTER TABLE chat_messages ADD COLUMN raw_content TEXT;",
+    // v10 — semantic chunk index (bge-small, 384-dim, L2-normalized f32 BLOB).
+    // Chunks cascade with their document (real FK, unlike the fts5 mirror).
+    // `embedded_at` NULL means the doc needs (re)embedding; the background
+    // worker (Slice 2) reconciles it. Ideas are never embedded (see D6).
+    "CREATE TABLE chunks (
+        id          TEXT PRIMARY KEY NOT NULL,
+        document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        ordinal     INTEGER NOT NULL,
+        content     TEXT NOT NULL,
+        embedding   BLOB NOT NULL,           -- 384 x f32 LE = 1536 bytes
+        created_at  TEXT NOT NULL
+    );
+    CREATE INDEX idx_chunks_doc ON chunks(document_id);
+    ALTER TABLE documents ADD COLUMN embedded_at TEXT;",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -972,6 +986,115 @@ pub fn reorder_folders(conn: &Connection, ids: &[String]) -> Result<()> {
     Ok(())
 }
 
+// --- Semantic chunk index (v10) --------------------------------------------
+// Storage layer for the `chunks` table. These plain fns over `&Connection` are
+// consumed by the background embed worker (Slice 2) and the `search_notes`
+// chat tool (Slice 3); Slice 1 lands + tests them via `embed::FakeEmbedder`.
+// `#[allow(dead_code)]` until those callers exist.
+
+/// A stored chunk with its decoded embedding, plus the parent document's name
+/// for citation. Returned by `all_chunk_embeddings` for in-memory cosine rank.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct ChunkVec {
+    pub id: String,
+    pub document_id: String,
+    pub doc_name: String,
+    pub content: String,
+    pub embedding: Vec<f32>,
+}
+
+/// Replace all chunks for a document in one transaction: delete the old rows,
+/// insert `(ordinal, content, embedding)` in order, and stamp `embedded_at`.
+/// Embeddings are stored as the L2-normalized f32 BLOB the caller passes (the
+/// worker normalizes; see `embed::normalize`).
+#[allow(dead_code)]
+pub fn replace_chunks(
+    conn: &Connection,
+    document_id: &str,
+    chunks: &[(usize, &str, &[f32])],
+) -> Result<()> {
+    let ts = now();
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM chunks WHERE document_id = ?1", [document_id])?;
+    for (ordinal, content, embedding) in chunks {
+        tx.execute(
+            "INSERT INTO chunks (id, document_id, ordinal, content, embedding, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                uuid::Uuid::new_v4().to_string(),
+                document_id,
+                *ordinal as i64,
+                content,
+                crate::embed::embedding_to_blob(embedding),
+                ts,
+            ],
+        )?;
+    }
+    tx.execute(
+        "UPDATE documents SET embedded_at = ?2 WHERE id = ?1",
+        rusqlite::params![document_id, ts],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Drop every chunk for a document (e.g. before a re-embed). Deleting the
+/// document itself cascades via the FK, so this is only for the re-index path.
+#[allow(dead_code)]
+pub fn delete_chunks(conn: &Connection, document_id: &str) -> Result<()> {
+    conn.execute("DELETE FROM chunks WHERE document_id = ?1", [document_id])?;
+    Ok(())
+}
+
+/// Load every chunk with its embedding decoded, joined to its document's name.
+/// Brute-force cosine ranking (plan D13) runs over this in memory — fine for a
+/// writer's corpus (thousands of chunks = low-ms); swap to ANN only if measured.
+#[allow(dead_code)]
+pub fn all_chunk_embeddings(conn: &Connection) -> Result<Vec<ChunkVec>> {
+    let mut stmt = conn.prepare(
+        "SELECT c.id, c.document_id, d.name, c.content, c.embedding
+         FROM chunks c JOIN documents d ON d.id = c.document_id
+         ORDER BY c.document_id, c.ordinal",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Vec<u8>>(4)?,
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (id, document_id, doc_name, content, blob) = row?;
+        out.push(ChunkVec {
+            id,
+            document_id,
+            doc_name,
+            content,
+            embedding: crate::embed::blob_to_embedding(&blob)?,
+        });
+    }
+    Ok(out)
+}
+
+/// Document ids that need (re)embedding: never embedded, or edited since. Ideas
+/// are excluded (plan D6). The parentheses keep a NULL `embedded_at` from
+/// leaking an idea through the OR.
+#[allow(dead_code)]
+pub fn docs_needing_embedding(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT id FROM documents
+         WHERE (embedded_at IS NULL OR embedded_at < updated_at) AND type <> 'idea'",
+    )?;
+    let ids = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1694,5 +1817,80 @@ mod tests {
         assert_eq!(folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), vec!["alpha", "Beta"]);
         assert_eq!(folders.iter().find(|f| f.id == "fa").unwrap().sort_order, 0);
         assert_eq!(folders.iter().find(|f| f.id == "fb").unwrap().sort_order, 1);
+    }
+
+    /// Embed two documents with the deterministic `FakeEmbedder`, store their
+    /// chunks, then rank the whole index against a query by cosine — the doc
+    /// that shares the query's vocabulary must come out on top. Exercises the
+    /// full chunk → embed → replace_chunks → all_chunk_embeddings round-trip
+    /// (BLOB encode/decode included) with no model download.
+    #[test]
+    fn semantic_ranking_end_to_end() {
+        use crate::embed::{self, Embedder, FakeEmbedder};
+        let conn = test_conn();
+        let embedder = FakeEmbedder;
+
+        let rust_doc = create_document(
+            &conn,
+            "Rust Notes",
+            None,
+            Some("# Borrow checker\nRust ownership lifetimes borrow checker move semantics."),
+        )
+        .unwrap();
+        let bread_doc = create_document(
+            &conn,
+            "Baking Notes",
+            None,
+            Some("# Sourdough\nBread flour water starter fermentation crumb crust."),
+        )
+        .unwrap();
+
+        for doc in [&rust_doc, &bread_doc] {
+            let content = get_document_content(&conn, &doc.id).unwrap();
+            let texts = embed::chunk_document(&content);
+            assert!(!texts.is_empty());
+            let vecs = embedder.embed_passages(&texts).unwrap();
+            let rows: Vec<(usize, &str, &[f32])> = texts
+                .iter()
+                .zip(&vecs)
+                .enumerate()
+                .map(|(i, (t, v))| (i, t.as_str(), v.as_slice()))
+                .collect();
+            replace_chunks(&conn, &doc.id, &rows).unwrap();
+        }
+
+        // embedded_at got stamped; both docs leave the "needs embedding" set.
+        assert!(docs_needing_embedding(&conn).unwrap().is_empty());
+
+        // Rank the corpus against a Rust query.
+        let q = embedder
+            .embed_query("how does the borrow checker enforce ownership")
+            .unwrap();
+        let mut ranked = all_chunk_embeddings(&conn).unwrap();
+        assert_eq!(ranked.len(), 2);
+        ranked.sort_by(|a, b| {
+            embed::cosine(&q, &b.embedding)
+                .partial_cmp(&embed::cosine(&q, &a.embedding))
+                .unwrap()
+        });
+        assert_eq!(ranked[0].doc_name, "Rust Notes");
+
+        // Deleting a document cascades its chunks away (real FK, unlike fts).
+        delete_document(&conn, &rust_doc.id).unwrap();
+        let remaining = all_chunk_embeddings(&conn).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].doc_name, "Baking Notes");
+    }
+
+    /// Ideas are never embedded (plan D6): the parenthesized predicate must not
+    /// leak a NULL-`embedded_at` idea into the worker's work-list.
+    #[test]
+    fn docs_needing_embedding_excludes_ideas() {
+        let conn = test_conn();
+        create_document(&conn, "Real Doc", Some(DocType::Generic), Some("body")).unwrap();
+        create_document(&conn, "An Idea", Some(DocType::Idea), Some("thought")).unwrap();
+
+        let pending = docs_needing_embedding(&conn).unwrap();
+        assert_eq!(pending.len(), 1, "only the non-idea doc is pending: {pending:?}");
     }
 }

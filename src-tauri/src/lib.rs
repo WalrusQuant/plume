@@ -1,5 +1,6 @@
 mod ai;
 mod commands;
+mod embed;
 mod error;
 mod export;
 mod preview;
