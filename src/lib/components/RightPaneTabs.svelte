@@ -9,8 +9,8 @@
   let { activeTab, onTabChange }: Props = $props();
 
   const TABS: { id: RightPaneTab; label: string }[] = [
-    { id: "preview", label: "Preview" },
     { id: "assistant", label: "Assistant" },
+    { id: "preview", label: "Preview" },
     { id: "history", label: "History" },
     { id: "cheatsheet", label: "Guide" },
   ];

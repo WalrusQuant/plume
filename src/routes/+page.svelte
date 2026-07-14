@@ -75,7 +75,7 @@
   let cursorPos = $state({ line: 1, col: 1 });
   let previewHtml = $state("");
   let wordCount = $state(0);
-  let rightTab = $state<RightPaneTab>("preview");
+  let rightTab = $state<RightPaneTab>("assistant");
   let exportTargets = $state<import("$lib/api").ExportTarget[]>([]);
   let exportStatus = $state("");
   let exportStatusTimer: ReturnType<typeof setTimeout> | null = null;

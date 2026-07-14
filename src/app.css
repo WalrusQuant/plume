@@ -1645,13 +1645,9 @@ button:focus-visible {
   scrollbar-width: thin;
 }
 
-/* Focus mode — the editor spans the full width (right pane unmounted). Keep a
-   comfortable reading measure by centering the whole scroller (gutter + text
-   move together, so the line-number gutter stays flush against the text). */
-.editor-container--focus .cm-scroller {
-  max-width: 860px;
-  margin: 0 auto;
-}
+/* Focus mode — the editor truly spans the full window width (right pane
+   unmounted). No reading-measure cap here: focus mode is explicitly "give me the
+   whole screen", so the scroller fills the pane like the normal editor does. */
 
 /* ---------------------------------------------------------
    Responsive — the layout targets a roomy window. Below these
