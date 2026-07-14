@@ -367,17 +367,25 @@ pub struct ImportResult {
     pub failed: Vec<ImportFailure>,
 }
 
-/// Import external files (md/txt/pdf/docx) as new documents. Each file's text is
-/// extracted and stored as a generic doc (name = filename stem); the embed worker
-/// then indexes them. A file that can't be read — unsupported type, encrypted or
-/// scanned PDF (no text), corrupt docx — is skipped and reported in `failed`, so
-/// one bad file never aborts the batch.
+/// Import external files (md/txt/pdf/docx). Each file's text is extracted and
+/// stored (name = filename stem); the embed worker then indexes it. `as_source`
+/// picks the kind: `true` → a read-only `Source` (searchable reference, lives in
+/// the Sources section), `false` → an editable `Generic` document. A file that
+/// can't be read — unsupported type, encrypted/scanned PDF (no text), corrupt
+/// docx — is skipped and reported in `failed`, so one bad file never aborts the
+/// batch.
 #[tauri::command]
 pub fn import_documents(
     db: State<Db>,
     embed: State<EmbedState>,
     paths: Vec<String>,
+    as_source: bool,
 ) -> Result<ImportResult> {
+    let doc_type = if as_source {
+        DocType::Source
+    } else {
+        DocType::Generic
+    };
     let mut imported = Vec::new();
     let mut failed = Vec::new();
     for path_str in &paths {
@@ -399,7 +407,7 @@ pub fn import_documents(
             }),
             Ok(text) => {
                 match db.with(|conn| {
-                    storage::create_document(conn, &name, Some(DocType::Generic), Some(&text))
+                    storage::create_document(conn, &name, Some(doc_type), Some(&text))
                 }) {
                     Ok(doc) => imported.push(doc),
                     Err(e) => failed.push(ImportFailure {

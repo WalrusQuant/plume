@@ -12,6 +12,7 @@ export type DocType =
   | "plan"
   | "build-log"
   | "idea"
+  | "source"
   | "generic";
 
 export interface Document {
@@ -210,9 +211,10 @@ export const api = {
   getEmbedModel: () => invoke<string>("get_embed_model"),
   setEmbedModel: (id: string) => invoke<ModelStatus>("set_embed_model", { id }),
 
-  /** Import external files (md/txt/pdf/docx) as new documents. */
-  importDocuments: (paths: string[]) =>
-    invoke<ImportResult>("import_documents", { paths }),
+  /** Import external files (md/txt/pdf/docx). asSource=true adds read-only,
+      searchable Sources; false creates editable documents. */
+  importDocuments: (paths: string[], asSource: boolean) =>
+    invoke<ImportResult>("import_documents", { paths, asSource }),
 
   sendAssistantMessage: (
     streamId: string,

@@ -20,6 +20,8 @@
     onImport: () => void;
     onNewIdea: () => void;
     onOpenIdea: (id: string) => void;
+    onOpenSource: (id: string) => void;
+    onRemoveSource: (id: string) => void;
     onExpandIdea: (id: string, type: DocType, label: string) => void;
     onCancelExpand: () => void;
     onConvertIdea: (id: string, type: DocType) => void;
@@ -45,6 +47,8 @@
     onImport,
     onNewIdea,
     onOpenIdea,
+    onOpenSource,
+    onRemoveSource,
     onExpandIdea,
     onCancelExpand,
     onConvertIdea,
@@ -376,6 +380,38 @@
   </div>
 {/snippet}
 
+{#snippet sourceItem(doc: Document)}
+  <div
+    class="sidebar-item {doc.id === selectedDocId ? 'sidebar-item--active' : ''}"
+    onclick={() => onOpenSource(doc.id)}
+    onkeydown={(e) => activateOn(e, () => onOpenSource(doc.id))}
+    role="button"
+    tabindex="0"
+  >
+    <div class="sidebar-item-icon">
+      <DocumentIcon type={doc.type} size={16} />
+    </div>
+    <div class="sidebar-item-info">
+      <span class="sidebar-item-name">{doc.name}</span>
+      <span class="sidebar-item-date">{formatDate(doc.updatedAt)}</span>
+    </div>
+    <div class="sidebar-item-actions">
+      <button
+        class="sidebar-action-btn sidebar-action-btn--delete"
+        onclick={(e) => {
+          e.stopPropagation();
+          onRemoveSource(doc.id);
+        }}
+        title="Remove source"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18 M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6 M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        </svg>
+      </button>
+    </div>
+  </div>
+{/snippet}
+
 {#snippet ideaItem(doc: Document)}
   <div
     class="sidebar-item {doc.id === selectedDocId ? 'sidebar-item--active' : ''}"
@@ -533,7 +569,15 @@
   {#if searching}
     <nav class="sidebar-search-results">
       {#each searchResults as hit (hit.id)}
-        <button class="sidebar-search-result" onclick={() => onSelect(hit.id)}>
+        <button
+          class="sidebar-search-result"
+          onclick={() =>
+            hit.type === "idea"
+              ? onOpenIdea(hit.id)
+              : hit.type === "source"
+                ? onOpenSource(hit.id)
+                : onSelect(hit.id)}
+        >
           <span class="sidebar-search-result-head">
             <DocumentIcon type={hit.type} size={14} />
             <span class="sidebar-search-result-name">{hit.name}</span>
@@ -698,6 +742,17 @@
       </div>
     {/if}
   </nav>
+
+  {#if tree.sources.length > 0}
+    <div class="sidebar-section-header">
+      <span class="sidebar-section-label">Sources</span>
+    </div>
+    <nav class="sidebar-inbox" aria-label="Sources">
+      {#each tree.sources as src (src.id)}
+        {@render sourceItem(src)}
+      {/each}
+    </nav>
+  {/if}
   {/if}
 
   {#if moveDocId && moveDoc}

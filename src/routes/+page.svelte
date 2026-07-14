@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
-  import { open } from "@tauri-apps/plugin-dialog";
+  import { open, confirm } from "@tauri-apps/plugin-dialog";
   import type { EditorView } from "@codemirror/view";
   import { api, type DocType, type Document, type Folder } from "$lib/api";
   import { getTemplate } from "$lib/templates";
@@ -18,6 +18,8 @@
   import NewDocumentDialog from "$lib/components/NewDocumentDialog.svelte";
   import IdeaCaptureModal from "$lib/components/IdeaCaptureModal.svelte";
   import MultiplyModal from "$lib/components/MultiplyModal.svelte";
+  import ImportModal from "$lib/components/ImportModal.svelte";
+  import SourceViewerModal from "$lib/components/SourceViewerModal.svelte";
   import { type MultiplyProgress, type MultiplyTarget } from "$lib/multiplyTargets";
   import RightPaneTabs, { type RightPaneTab } from "$lib/components/RightPaneTabs.svelte";
   import AssistantPanel from "$lib/components/AssistantPanel.svelte";
@@ -361,13 +363,37 @@
 
   const IMPORT_EXTENSIONS = ["md", "markdown", "txt", "text", "pdf", "docx"];
 
-  /** Import external files as documents: extract text, create docs, index them.
-      Reports skipped files, and opens the first successful import. */
-  async function importFiles(paths: string[]) {
+  // Import flow: pick/drop files → ImportModal asks documents-vs-sources → runImport.
+  let importModalOpen = $state(false);
+  let pendingImportPaths = $state<string[]>([]);
+
+  /** Stage picked/dropped files and ask how to import them. */
+  function stageImport(paths: string[]) {
+    if (paths.length === 0) return;
+    pendingImportPaths = paths;
+    importModalOpen = true;
+  }
+
+  /** Open a file picker; stage whatever the user chooses. */
+  async function pickAndImport() {
+    const chosen = await open({
+      multiple: true,
+      filters: [{ name: "Documents", extensions: IMPORT_EXTENSIONS }],
+    });
+    if (!chosen) return; // cancelled
+    stageImport(Array.isArray(chosen) ? chosen : [chosen]);
+  }
+
+  /** Run the staged import in the chosen mode. Editable docs open the first
+      result; sources just land in the Sources section. Skipped files toast. */
+  async function runImport(asSource: boolean) {
+    const paths = pendingImportPaths;
+    importModalOpen = false;
+    pendingImportPaths = [];
     if (paths.length === 0) return;
     let result;
     try {
-      result = await api.importDocuments(paths);
+      result = await api.importDocuments(paths, asSource);
     } catch (e) {
       toast.error(`Import failed: ${formatError(e)}`);
       return;
@@ -380,19 +406,54 @@
     }
     if (result.imported.length) {
       const n = result.imported.length;
-      toast.show(`Imported ${n} document${n === 1 ? "" : "s"}`, "info");
-      await selectDocument(result.imported[0].id);
+      const noun = asSource ? "source" : "document";
+      toast.show(`Imported ${n} ${noun}${n === 1 ? "" : "s"}`, "info");
+      if (!asSource) await selectDocument(result.imported[0].id);
     }
   }
 
-  /** Open a file picker and import whatever the user chooses. */
-  async function pickAndImport() {
-    const chosen = await open({
-      multiple: true,
-      filters: [{ name: "Documents", extensions: IMPORT_EXTENSIONS }],
-    });
-    if (!chosen) return; // cancelled
-    await importFiles(Array.isArray(chosen) ? chosen : [chosen]);
+  // ----- sources (read-only reference docs) -----
+  let sourceViewerOpen = $state(false);
+  let viewedSource = $state<Document | null>(null);
+
+  function openSource(id: string) {
+    const doc = documents.find((d) => d.id === id) ?? null;
+    if (!doc) return;
+    viewedSource = doc;
+    sourceViewerOpen = true;
+  }
+
+  /** Remove a source: delete it (its chunks cascade out of the search index). */
+  async function removeSource(id: string) {
+    const doc = documents.find((d) => d.id === id);
+    const ok = await confirm(
+      `Remove source "${doc?.name ?? ""}"? It will no longer be searchable.`,
+      { kind: "warning" },
+    );
+    if (!ok) return;
+    try {
+      await api.deleteDocument(id);
+      documents = documents.filter((d) => d.id !== id);
+      if (viewedSource?.id === id) {
+        sourceViewerOpen = false;
+        viewedSource = null;
+      }
+    } catch (e) {
+      toast.error(`Couldn't remove source: ${formatError(e)}`);
+    }
+  }
+
+  /** Promote a source to an editable document and open it. */
+  async function convertSource(id: string, name: string) {
+    try {
+      const updated = await api.updateDocumentType(id, "generic", name, true);
+      documents = documents.map((d) => (d.id === id ? updated : d));
+      sourceViewerOpen = false;
+      viewedSource = null;
+      await selectDocument(id);
+    } catch (e) {
+      toast.error(`Couldn't convert source: ${formatError(e)}`);
+    }
   }
 
   /** Back to the shelf: no document open. */
@@ -788,7 +849,7 @@
             }
             return;
           }
-          void importFiles(paths);
+          stageImport(paths);
         } else if (event.payload.type === "leave") {
           dragOver = false;
         } else {
@@ -847,6 +908,8 @@
     onGoHome={() => run(goHome(), "Home")}
     onNewDocument={() => openNewDocument()}
     onImport={() => void pickAndImport()}
+    onOpenSource={openSource}
+    onRemoveSource={(id) => void removeSource(id)}
     onNewIdea={newIdea}
     onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
     onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
@@ -885,6 +948,19 @@
     onCancel={cancelMultiply}
     onClose={closeMultiply}
     onOpenSettings={() => (settingsOpen = true)}
+  />
+  <ImportModal
+    open={importModalOpen}
+    files={pendingImportPaths}
+    onChoose={(asSource) => void runImport(asSource)}
+    onClose={() => (importModalOpen = false)}
+  />
+  <SourceViewerModal
+    open={sourceViewerOpen}
+    source={viewedSource}
+    onClose={() => (sourceViewerOpen = false)}
+    onRemove={(id) => void removeSource(id)}
+    onConvert={(id, name) => void convertSource(id, name)}
   />
   <Toasts />
   <div class="main-content">

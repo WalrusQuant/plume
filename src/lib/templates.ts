@@ -255,6 +255,8 @@ const templates: Record<DocType, string> = {
   plan: planTemplate,
   "build-log": buildLogTemplate,
   idea: "",
+  // sources are imported, never created from a template
+  source: "",
   generic: "",
 };
 

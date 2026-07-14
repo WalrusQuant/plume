@@ -20,6 +20,9 @@ pub enum DocType {
     Plan,
     BuildLog,
     Idea,
+    /// An imported reference document: indexed + searchable by the assistant, but
+    /// not edited in the main editor. Lives in the sidebar "Sources" section.
+    Source,
     Generic,
 }
 
@@ -37,6 +40,7 @@ impl DocType {
             DocType::Plan => "plan",
             DocType::BuildLog => "build-log",
             DocType::Idea => "idea",
+            DocType::Source => "source",
             DocType::Generic => "generic",
         }
     }
@@ -54,6 +58,7 @@ impl DocType {
             "plan" => Ok(DocType::Plan),
             "build-log" => Ok(DocType::BuildLog),
             "idea" => Ok(DocType::Idea),
+            "source" => Ok(DocType::Source),
             "generic" => Ok(DocType::Generic),
             other => Err(Error::InvalidInput(format!("unknown document type: {other}"))),
         }

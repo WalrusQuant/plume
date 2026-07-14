@@ -59,7 +59,9 @@
     [...tree.folderTree.filter((f) => f.active)].sort((a, b) => freshness(b) - freshness(a)),
   );
   const restingProjects = $derived(tree.folderTree.filter((f) => !f.active));
-  const recent = $derived(documents.filter((d) => d.type !== "idea").slice(0, 8));
+  const recent = $derived(
+    documents.filter((d) => d.type !== "idea" && d.type !== "source").slice(0, 8),
+  );
   const inbox = $derived(tree.ideas.slice(0, 8));
   const isEmpty = $derived(folders.length === 0 && recent.length === 0);
 

@@ -82,6 +82,9 @@ const _EXHAUSTIVE: Record<DocType, true> = {
   // `idea` is intentionally excluded from DOCUMENT_TYPES — ideas are captured
   // via the IdeaCaptureModal, never the new-doc picker.
   idea: true,
+  // `source` is excluded too — sources arrive only via import (as read-only
+  // reference material), never the new-doc picker.
+  source: true,
   generic: true,
 };
 void _EXHAUSTIVE;
