@@ -1,7 +1,8 @@
 // First-run welcome document. A real, editable doc (seeded once into an empty
 // library by +page.svelte's onMount) that teaches markdown in context: every
 // feature below renders in the Preview tab, so the doc IS the demo. Points the
-// reader at the Guide tab (cheatsheet) and the Assistant tab.
+// reader at the Guide tab (cheatsheet), the Assistant tab, and the local-search
+// model they need to download to search their own notes.
 
 export const WELCOME_DOC_TITLE = "Welcome to Plume";
 
@@ -9,12 +10,33 @@ export const WELCOME_DOC_TITLE = "Welcome to Plume";
 // so this template literal stays a plain string.
 export const WELCOME_DOC_BODY = `# Welcome to Plume 👋
 
-Plume is a **local-first writing studio**: you write in markdown, an AI partner
-helps you draft and edit, and you export to wherever you publish — blog,
-newsletter, LinkedIn, or X.
+Plume is a **local-first AI writing studio** for people who build in public. You
+write in markdown, an AI partner drafts and edits alongside you, and it can
+search your own notes — all on your machine. Nothing leaves your computer unless
+you send it.
 
 This is a real document. Play with it, rewrite it, or delete it when you're
 ready — nothing here is special.
+
+---
+
+## Search your own notes 🔎
+
+Plume can ground the AI in *your* writing. In the **Assistant** tab, turn on
+**Search your notes** and Plume pulls the most relevant passages from your own
+documents and answers from them — a private research partner over everything
+you've written.
+
+This runs a small model **entirely on your machine**, so you download it once
+before it works:
+
+1. Open **Settings** (the gear icon).
+2. Go to the **Local search** tab.
+3. Pick a model and click **Download**. Plume then indexes your notes quietly in
+   the background.
+
+You can switch models or remove the download any time — either way, your
+documents never leave your computer.
 
 ---
 
@@ -50,7 +72,7 @@ And a checklist to track work:
 
 - [x] Open Plume
 - [ ] Write something
-- [ ] Publish it
+- [ ] Search your notes
 
 ## Links and code
 
@@ -64,20 +86,22 @@ function greet(name) {
 
 ## Tables
 
-| Feature          | Where to find it |
-| ---------------- | ---------------- |
-| Live preview     | Preview tab      |
-| Markdown syntax  | Guide tab        |
-| AI writing partner | Assistant tab  |
-| Version history  | History tab      |
+| Feature            | Where to find it  |
+| ------------------ | ----------------- |
+| Live preview       | Preview tab       |
+| Markdown syntax    | Guide tab         |
+| AI writing partner | Assistant tab     |
+| Search your notes  | Settings → Local search |
+| Version history    | History tab       |
 
 ---
 
-## Three tabs worth knowing
+## The tabs worth knowing
 
 - **Preview** — your formatted writing, live as you type.
 - **Guide** — a one-screen markdown cheatsheet, handy while you learn.
-- **Assistant** — ask the AI to draft, rewrite, or brainstorm with you.
+- **Assistant** — draft, rewrite, or brainstorm with the AI, and search your notes.
+- **History** — snapshots of your document you can restore any time.
 
 When you're ready to start fresh, hit **New** and pick a template. Happy
 writing. ✍️

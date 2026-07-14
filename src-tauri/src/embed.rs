@@ -29,9 +29,19 @@ pub const EMBED_DIM: usize = 384;
 pub const EMBED_BYTES: usize = EMBED_DIM * 4;
 
 /// Rough target words per chunk. We only split at block boundaries, so an
-/// oversized single block (a very long paragraph or code block) stays whole —
-/// a chunk may exceed this, but a code block is never split.
-const CHUNK_TARGET_WORDS: usize = 280;
+/// oversized single block (a very long paragraph or code block) is split by a
+/// hard ceiling (`CHUNK_MAX_WORDS`) so no chunk overruns the model's token
+/// window — see that constant.
+const CHUNK_TARGET_WORDS: usize = 220;
+
+/// Hard per-chunk ceiling in words. Embedding models silently *truncate* input
+/// past ~512 tokens (fastembed's `DEFAULT_MAX_LENGTH`, enforced via the
+/// tokenizer's `TruncationParams` — it does not split or error), so anything
+/// beyond that in a single chunk would be dropped from the vector. ~220-256
+/// English words ≈ well under 512 tokens for prose, with headroom for denser
+/// content (code, URLs) that tokenizes into more tokens per word. A block bigger
+/// than this is split at word boundaries so its tail is still embedded.
+const CHUNK_MAX_WORDS: usize = 256;
 
 /// Produces vector embeddings. The real impl (Slice 2) wraps fastembed; tests
 /// use a deterministic fake. `embed_query` and `embed_passages` are split
@@ -44,9 +54,10 @@ pub trait Embedder: Send + Sync {
 }
 
 /// Split a document into ordered chunks of plain text, ~`CHUNK_TARGET_WORDS`
-/// each, breaking only at top-level block boundaries. Headings start a new
-/// chunk (section boundary); a code block is emitted whole and never split.
-/// Pure — no I/O. Returns `[]` for empty/whitespace-only input.
+/// each, breaking at top-level block boundaries (headings start a new section).
+/// A final pass caps every chunk at `CHUNK_MAX_WORDS` so an oversized single
+/// block — a huge paragraph or long code block — is split rather than truncated
+/// by the model. Pure — no I/O. Returns `[]` for empty/whitespace-only input.
 pub fn chunk_document(content: &str) -> Vec<String> {
     let arena = comrak::Arena::new();
     let root = comrak::parse_document(&arena, content, &crate::preview::options());
@@ -81,7 +92,26 @@ pub fn chunk_document(content: &str) -> Vec<String> {
         }
     }
     push_chunk(&mut buf, &mut buf_words, &mut chunks);
+
+    // Cap each chunk at the hard ceiling: an oversized block (or an overshooting
+    // merge) is split at word boundaries so nothing is silently truncated when
+    // embedded. Chunks already under the ceiling pass through unchanged.
     chunks
+        .into_iter()
+        .flat_map(|c| split_to_max_words(c, CHUNK_MAX_WORDS))
+        .collect()
+}
+
+/// Split `text` into pieces of at most `max_words` words each, at whitespace
+/// boundaries. Returns the text unchanged (one element) when already within the
+/// limit — so normal chunks keep their exact formatting; only oversized ones are
+/// re-joined with single spaces (fine: we embed flattened text regardless).
+fn split_to_max_words(text: String, max_words: usize) -> Vec<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.len() <= max_words {
+        return vec![text];
+    }
+    words.chunks(max_words).map(|w| w.join(" ")).collect()
 }
 
 /// Flush the accumulator into `chunks` if it holds non-whitespace text.
@@ -654,6 +684,40 @@ More prose here about beta topics.
     fn empty_document_yields_no_chunks() {
         assert!(chunk_document("").is_empty());
         assert!(chunk_document("   \n\n  \t").is_empty());
+    }
+
+    #[test]
+    fn oversized_block_is_split_under_the_ceiling() {
+        // One giant paragraph, well past the token window, must not become a
+        // single chunk (which the model would truncate) — it's split instead.
+        let para = "lorem ".repeat(1000); // 1000 words, one block
+        let chunks = chunk_document(&para);
+        assert!(chunks.len() > 1, "a 1000-word block must split, got {}", chunks.len());
+        for c in &chunks {
+            assert!(
+                c.split_whitespace().count() <= CHUNK_MAX_WORDS,
+                "every chunk stays within the ceiling"
+            );
+        }
+        // No words are lost in the split.
+        let total: usize = chunks.iter().map(|c| c.split_whitespace().count()).sum();
+        assert_eq!(total, 1000);
+
+        // A long code block is likewise split, not emitted whole.
+        let code = format!("```\n{}\n```", "token ".repeat(800));
+        let code_chunks = chunk_document(&code);
+        assert!(code_chunks.len() > 1, "a long code block must split too");
+        assert!(code_chunks.iter().all(|c| c.split_whitespace().count() <= CHUNK_MAX_WORDS));
+    }
+
+    #[test]
+    fn short_chunks_pass_through_unchanged() {
+        // A normal small doc keeps its exact text — the ceiling only bites on
+        // oversized blocks.
+        let md = "# Title\n\nA short paragraph with a few words.";
+        let chunks = chunk_document(md);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].contains("A short paragraph with a few words."));
     }
 
     #[test]
