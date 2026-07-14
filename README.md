@@ -7,7 +7,7 @@ finished piece for wherever you publish. Everything stays on your machine.
 
 Built for people who write in markdown and build in public.
 
-![Plume — the markdown editor with an AI assistant that searches your own documents](docs/screenshot-assistant.png)
+![Plume — the markdown editor with an AI assistant that searches your own documents](docs/screenshot.png)
 
 ## Features
 
