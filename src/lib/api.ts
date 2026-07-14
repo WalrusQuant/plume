@@ -85,6 +85,24 @@ export interface SnapshotMeta {
   createdAt: string;
 }
 
+/** On-disk state of the active local semantic-search model (see Settings). */
+export interface ModelStatus {
+  activeModelId: string;
+  installed: boolean;
+  path: string;
+  sizeBytes: number;
+}
+
+/** A curated embedding model as shown in the Settings dropdown. */
+export interface EmbedModelInfo {
+  id: string;
+  label: string;
+  dim: number;
+  sizeLabel: string;
+  note: string;
+  installed: boolean;
+}
+
 export interface ExportTarget {
   id: string;
   label: string;
@@ -174,6 +192,17 @@ export const api = {
   setTavilyKey: (key: string) => invoke<void>("set_tavily_key", { key }),
   hasTavilyKey: () => invoke<boolean>("has_tavily_key"),
   deleteTavilyKey: () => invoke<void>("delete_tavily_key"),
+
+  /** Local semantic-search model: status, explicit download, and removal.
+      Downloading is the only path that fetches the ~128 MB model — the
+      background indexer never downloads on its own. */
+  embedModelStatus: () => invoke<ModelStatus>("embed_model_status"),
+  downloadEmbedModel: () => invoke<ModelStatus>("download_embed_model"),
+  removeEmbedModel: () => invoke<ModelStatus>("remove_embed_model"),
+  /** Curated model catalog + the active model id; switching wipes + re-indexes. */
+  listEmbedModels: () => invoke<EmbedModelInfo[]>("list_embed_models"),
+  getEmbedModel: () => invoke<string>("get_embed_model"),
+  setEmbedModel: (id: string) => invoke<ModelStatus>("set_embed_model", { id }),
 
   sendAssistantMessage: (
     streamId: string,

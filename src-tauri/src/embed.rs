@@ -126,12 +126,16 @@ pub fn embedding_to_blob(v: &[f32]) -> Vec<u8> {
     bytes
 }
 
-/// Deserialize a `chunks.embedding` BLOB back to f32s, asserting the exact
-/// `EMBED_BYTES` length — a wrong-sized blob means a corrupt/foreign row.
+/// Deserialize a `chunks.embedding` BLOB back to f32s. The dimension is no
+/// longer fixed (the active model may be 384/768/1024-dim), so we require only a
+/// non-empty, 4-byte-aligned blob — a length that isn't a whole number of f32s
+/// means a corrupt row. Cross-model comparison is prevented upstream: switching
+/// models wipes the index, and `run_semantic_search` skips any chunk whose dim
+/// doesn't match the query.
 pub fn blob_to_embedding(blob: &[u8]) -> Result<Vec<f32>> {
-    if blob.len() != EMBED_BYTES {
+    if blob.is_empty() || blob.len() % 4 != 0 {
         return Err(Error::InvalidInput(format!(
-            "embedding blob is {} bytes, expected {EMBED_BYTES}",
+            "embedding blob is {} bytes, not a whole number of f32s",
             blob.len()
         )));
     }
@@ -165,26 +169,202 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
     }
 }
 
-/// bge wants a retrieval instruction on the query side only (plan D2); document
-/// chunks are embedded bare. fastembed does no auto-prefixing, so we prepend it.
-const QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
+/// One selectable embedding model. Each has its own dimension and retrieval
+/// prefixes, so switching between them is not interchangeable — vectors from
+/// different models live in different spaces and can't be compared. The chunk
+/// index is therefore always single-model; a switch wipes and re-embeds it
+/// (`storage::clear_index_for_reembed`).
+pub struct ModelChoice {
+    /// Stable id persisted in `app_settings` and sent over IPC.
+    pub id: &'static str,
+    /// Human label for the Settings dropdown.
+    pub label: &'static str,
+    /// The fastembed variant to load.
+    pub model: EmbeddingModel,
+    /// Output dimensionality (informational; the model dictates it at runtime).
+    pub dim: usize,
+    /// fastembed's `model_code` — also the hf-hub cache folder stem, so the
+    /// on-disk dir is `{cache_dir}/models--{repo with '/' → '--'}`.
+    pub repo: &'static str,
+    /// Prefix prepended to a search query before embedding (model-specific:
+    /// bge uses a retrieval instruction, e5 uses "query: ", MiniLM none).
+    pub query_prefix: &'static str,
+    /// Prefix prepended to document chunks (e5 uses "passage: "; others none).
+    pub passage_prefix: &'static str,
+    /// Approximate download size, shown before the user commits to it.
+    pub size_label: &'static str,
+    /// One-line guidance for the dropdown.
+    pub note: &'static str,
+}
 
-/// The real fastembed-backed embedder. The ONNX model (bge-small int8, ~32 MB)
-/// is loaded lazily on first use — app startup never blocks and never fails
-/// offline; a first-run download failure just leaves docs dirty to retry. One
-/// shared session behind a `Mutex` (plan D3); every call runs on a blocking
-/// thread, never the async reactor.
+/// The curated, vetted set offered in Settings → Local search. All are fp32
+/// (non-quantized) — the int8 variants failed at inference under the bundled
+/// onnxruntime (see the bge-small note in `with_model`). Order is display order.
+pub static CURATED_MODELS: &[ModelChoice] = &[
+    ModelChoice {
+        id: "minilm-l6",
+        label: "MiniLM-L6 — fastest",
+        model: EmbeddingModel::AllMiniLML6V2,
+        dim: 384,
+        repo: "Qdrant/all-MiniLM-L6-v2-onnx",
+        query_prefix: "",
+        passage_prefix: "",
+        size_label: "~90 MB",
+        note: "Smallest and fastest. Good English search on a light footprint.",
+    },
+    ModelChoice {
+        id: "bge-small",
+        label: "BGE-small — recommended",
+        model: EmbeddingModel::BGESmallENV15,
+        dim: 384,
+        repo: "Xenova/bge-small-en-v1.5",
+        query_prefix: "Represent this sentence for searching relevant passages: ",
+        passage_prefix: "",
+        size_label: "~130 MB",
+        note: "Balanced quality and size. The default.",
+    },
+    ModelChoice {
+        id: "bge-base",
+        label: "BGE-base — higher quality",
+        model: EmbeddingModel::BGEBaseENV15,
+        dim: 768,
+        repo: "Xenova/bge-base-en-v1.5",
+        query_prefix: "Represent this sentence for searching relevant passages: ",
+        passage_prefix: "",
+        size_label: "~440 MB",
+        note: "Stronger retrieval for a larger download.",
+    },
+    ModelChoice {
+        id: "e5-multilingual",
+        label: "E5-small — multilingual",
+        model: EmbeddingModel::MultilingualE5Small,
+        dim: 384,
+        repo: "intfloat/multilingual-e5-small",
+        query_prefix: "query: ",
+        passage_prefix: "passage: ",
+        size_label: "~470 MB",
+        note: "For notes in languages other than English.",
+    },
+];
+
+/// The default model id when nothing is persisted — matches the shipped index,
+/// so existing users' 384-dim chunks stay valid with no forced re-embed.
+pub const DEFAULT_MODEL_ID: &str = "bge-small";
+
+/// Look up a curated model by id.
+pub fn find_model(id: &str) -> Option<&'static ModelChoice> {
+    CURATED_MODELS.iter().find(|m| m.id == id)
+}
+
+/// The default model (guaranteed present in the catalog).
+pub fn default_model() -> &'static ModelChoice {
+    find_model(DEFAULT_MODEL_ID).expect("default model id must be in CURATED_MODELS")
+}
+
+/// A curated model as shown in the Settings dropdown, with its per-machine
+/// installed flag resolved.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedModelInfo {
+    pub id: String,
+    pub label: String,
+    pub dim: usize,
+    pub size_label: String,
+    pub note: String,
+    pub installed: bool,
+}
+
+/// On-disk state of the local embedding model, surfaced to the Settings UI.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelStatus {
+    /// Id of the currently-active model (from the curated catalog).
+    pub active_model_id: String,
+    /// True once the active model's files are present and loadable.
+    pub installed: bool,
+    /// Absolute cache folder for the active model, installed or not.
+    pub path: String,
+    /// Bytes on disk under `path` (0 when not installed).
+    pub size_bytes: u64,
+}
+
+/// Recursively look for any `.onnx` file under `dir` (depth-limited to the
+/// hf-hub `snapshots/<hash>/` layout). Presence of the model weights is our
+/// "installed" signal — a bare cache folder or aborted download has none.
+fn contains_onnx(dir: &Path) -> bool {
+    fn walk(dir: &Path, depth: usize) -> bool {
+        if depth == 0 {
+            return false;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if walk(&path, depth - 1) {
+                    return true;
+                }
+            } else if path.extension().is_some_and(|e| e == "onnx") {
+                return true;
+            }
+        }
+        false
+    }
+    walk(dir, 5)
+}
+
+/// Total bytes of regular files under `dir` (follows the hf-hub tree, including
+/// the deduped `blobs/`). Best-effort — unreadable entries are skipped.
+fn dir_size(dir: &Path) -> u64 {
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry.metadata() {
+                Ok(m) if m.is_dir() => total += dir_size(&path),
+                Ok(m) => total += m.len(),
+                Err(_) => {}
+            }
+        }
+    }
+    total
+}
+
+/// The real fastembed-backed embedder. The active model is chosen in Settings
+/// (`choice`), loaded lazily, but only ever downloaded by an explicit
+/// `ensure_loaded` (the "Download model" button) — the background worker refuses
+/// to index until `is_installed` is true, so startup never blocks and nothing is
+/// fetched behind the user's back. One shared session behind a `Mutex` (plan D3);
+/// every call runs on a blocking thread, never the async reactor.
 pub struct FastEmbedder {
     cache_dir: PathBuf,
+    /// The active model. Swapping it (Settings dropdown) drops the loaded
+    /// session so the next call loads the newly-selected one.
+    choice: Mutex<&'static ModelChoice>,
     model: Mutex<Option<TextEmbedding>>,
 }
 
 impl FastEmbedder {
-    pub fn new(cache_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: PathBuf, choice: &'static ModelChoice) -> Self {
         Self {
             cache_dir,
+            choice: Mutex::new(choice),
             model: Mutex::new(None),
         }
+    }
+
+    /// The currently-selected model. `&'static` so the guard is dropped
+    /// immediately (references are `Copy`), never held across the model lock.
+    pub fn current_choice(&self) -> &'static ModelChoice {
+        *self.choice.lock().unwrap()
+    }
+
+    /// Switch the active model, dropping any loaded session. The caller is
+    /// responsible for wiping + re-indexing (vectors aren't cross-comparable).
+    pub fn set_choice(&self, choice: &'static ModelChoice) {
+        *self.choice.lock().unwrap() = choice;
+        *self.model.lock().unwrap() = None;
     }
 
     /// True once the model has been loaded — lets the worker emit a one-time
@@ -193,19 +373,86 @@ impl FastEmbedder {
         self.model.lock().unwrap().is_some()
     }
 
-    /// Run `f` with the lazily-initialized model. The first call downloads +
-    /// loads it (cache dir pinned to app data dir — plan D1, the crate default
-    /// is cwd-relative and wrong for a bundled `.app`); later calls reuse it.
+    /// hf-hub cache folder for the active model, whether or not it's downloaded.
+    pub fn model_dir(&self) -> PathBuf {
+        self.model_dir_for(self.current_choice())
+    }
+
+    fn model_dir_for(&self, choice: &ModelChoice) -> PathBuf {
+        self.cache_dir
+            .join(format!("models--{}", choice.repo.replace('/', "--")))
+    }
+
+    /// True when the active model is present on disk — i.e. an `.onnx` file
+    /// exists under its cache folder. A bare/partial folder counts as not
+    /// installed so a half-finished download doesn't masquerade as ready.
+    pub fn is_installed(&self) -> bool {
+        contains_onnx(&self.model_dir())
+    }
+
+    /// The whole curated catalog with each model's installed flag resolved,
+    /// for the Settings dropdown.
+    pub fn list_models(&self) -> Vec<EmbedModelInfo> {
+        CURATED_MODELS
+            .iter()
+            .map(|m| EmbedModelInfo {
+                id: m.id.to_string(),
+                label: m.label.to_string(),
+                dim: m.dim,
+                size_label: m.size_label.to_string(),
+                note: m.note.to_string(),
+                installed: contains_onnx(&self.model_dir_for(m)),
+            })
+            .collect()
+    }
+
+    /// On-disk status of the active model for the Settings UI.
+    pub fn status(&self) -> ModelStatus {
+        let choice = self.current_choice();
+        let dir = self.model_dir_for(choice);
+        let installed = contains_onnx(&dir);
+        ModelStatus {
+            active_model_id: choice.id.to_string(),
+            installed,
+            path: dir.to_string_lossy().into_owned(),
+            size_bytes: if installed { dir_size(&dir) } else { 0 },
+        }
+    }
+
+    /// Force the lazy download + load of the active model. This is the ONLY path
+    /// that fetches a model — the background worker never downloads (it waits for
+    /// this). Blocks on the network; callers run it off the async reactor.
+    pub fn ensure_loaded(&self) -> Result<()> {
+        self.with_model(|_| Ok(()))
+    }
+
+    /// Drop the in-memory session and delete the active model's cache folder,
+    /// then report the resulting status. The model lock is held across the delete
+    /// so a concurrent worker pass can't re-download into the folder mid-removal.
+    /// Stored chunks are left untouched — search keeps working on already-indexed
+    /// docs; only new/edited docs stall until the model is downloaded again.
+    pub fn remove_files(&self) -> Result<ModelStatus> {
+        let mut guard = self.model.lock().unwrap();
+        *guard = None;
+        let dir = self.model_dir();
+        if dir.exists() {
+            std::fs::remove_dir_all(&dir)?;
+        }
+        drop(guard);
+        Ok(self.status())
+    }
+
+    /// Run `f` with the lazily-initialized active model. The first call
+    /// downloads + loads it (cache dir pinned to app data dir — plan D1, the
+    /// crate default is cwd-relative and wrong for a bundled `.app`); later calls
+    /// reuse it. All curated models are fp32: the int8 (`…Q`) variants fail at
+    /// inference under the bundled onnxruntime — a `SkipLayerNormalization` op is
+    /// missing a LayerNorm weight input.
     fn with_model<T>(&self, f: impl FnOnce(&TextEmbedding) -> Result<T>) -> Result<T> {
+        let choice = self.current_choice();
         let mut guard = self.model.lock().unwrap();
         if guard.is_none() {
-            // Non-quantized bge-small (fp32, ~127 MB). The int8 `BGESmallENV15Q`
-            // variant fails at inference under this bundled onnxruntime — its
-            // SkipLayerNormalization op is missing a LayerNorm weight input
-            // ("Missing Input: encoder.layer.0.attention.output.LayerNorm.weight").
-            // fp32 runs cleanly and gives slightly better retrieval anyway.
-            let opts = InitOptions::new(EmbeddingModel::BGESmallENV15)
-                .with_cache_dir(self.cache_dir.clone());
+            let opts = InitOptions::new(choice.model.clone()).with_cache_dir(self.cache_dir.clone());
             let model = TextEmbedding::try_new(opts)
                 .map_err(|e| Error::Embed(format!("load embedding model: {e}")))?;
             *guard = Some(model);
@@ -219,9 +466,15 @@ impl Embedder for FastEmbedder {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
+        let prefix = self.current_choice().passage_prefix;
+        let prefixed: Vec<String> = if prefix.is_empty() {
+            texts.to_vec()
+        } else {
+            texts.iter().map(|t| format!("{prefix}{t}")).collect()
+        };
         self.with_model(|model| {
             let mut out = model
-                .embed(texts.to_vec(), None)
+                .embed(prefixed, None)
                 .map_err(|e| Error::Embed(format!("embed passages: {e}")))?;
             for v in &mut out {
                 normalize(v);
@@ -231,9 +484,10 @@ impl Embedder for FastEmbedder {
     }
 
     fn embed_query(&self, query: &str) -> Result<Vec<f32>> {
+        let prefix = self.current_choice().query_prefix;
         self.with_model(|model| {
             let mut out = model
-                .embed(vec![format!("{QUERY_PREFIX}{query}")], None)
+                .embed(vec![format!("{prefix}{query}")], None)
                 .map_err(|e| Error::Embed(format!("embed query: {e}")))?;
             let mut v = out
                 .pop()
@@ -292,6 +546,13 @@ async fn process_pending(app: &AppHandle, db_path: &Path, embedder: &Arc<FastEmb
     let conn = open_worker_conn(db_path)?;
     let ids = crate::storage::docs_needing_embedding(&conn)?;
     if ids.is_empty() {
+        return Ok(());
+    }
+    // The worker never downloads: if the user hasn't installed the model from
+    // Settings yet, leave the docs dirty and signal the UI. They'll be indexed
+    // on the next pass once the model is present (download nudges the worker).
+    if !embedder.is_installed() {
+        let _ = app.emit(EVT_EMBED_STATUS, "needs-model");
         return Ok(());
     }
     if !embedder.is_loaded() {
@@ -396,15 +657,105 @@ More prose here about beta topics.
     }
 
     #[test]
-    fn blob_roundtrips_and_rejects_wrong_length() {
-        let mut v: Vec<f32> = (0..EMBED_DIM).map(|i| i as f32 * 0.001 - 0.19).collect();
+    fn blob_roundtrips_at_any_dimension_and_rejects_misaligned() {
+        // Round-trips whatever dimension the active model produced (here 768).
+        let mut v: Vec<f32> = (0..768).map(|i| i as f32 * 0.001 - 0.19).collect();
         normalize(&mut v);
         let blob = embedding_to_blob(&v);
-        assert_eq!(blob.len(), EMBED_BYTES);
-        let back = blob_to_embedding(&blob).unwrap();
-        assert_eq!(v, back);
-        // A short blob is rejected, never silently truncated.
-        assert!(blob_to_embedding(&blob[..EMBED_BYTES - 4]).is_err());
+        assert_eq!(blob.len(), 768 * 4);
+        assert_eq!(blob_to_embedding(&blob).unwrap(), v);
+        // A blob that isn't a whole number of f32s is corrupt → rejected.
+        assert!(blob_to_embedding(&blob[..blob.len() - 1]).is_err());
+        // An empty blob is rejected too.
+        assert!(blob_to_embedding(&[]).is_err());
+    }
+
+    /// Fresh, isolated temp dir for a test (no `tempfile` dev-dep). Cleaned up
+    /// on entry so a prior crashed run can't leak state into this one.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("plume-embed-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Populate `cache_dir` with a fake hf-hub model folder holding a dummy
+    /// `.onnx`, mimicking a completed download.
+    fn seed_model(cache_dir: &Path, folder: &str, onnx_bytes: usize) {
+        let snap = cache_dir.join(folder).join("snapshots").join("deadbeef");
+        std::fs::create_dir_all(&snap).unwrap();
+        std::fs::write(snap.join("model.onnx"), vec![0u8; onnx_bytes]).unwrap();
+    }
+
+    #[test]
+    fn model_dir_follows_hf_hub_naming() {
+        let e = FastEmbedder::new(PathBuf::from("/cache"), default_model());
+        assert_eq!(
+            e.model_dir(),
+            PathBuf::from("/cache/models--Xenova--bge-small-en-v1.5")
+        );
+    }
+
+    #[test]
+    fn default_model_and_dim_are_bge_small() {
+        assert_eq!(default_model().id, "bge-small");
+        assert_eq!(default_model().dim, 384);
+        assert!(find_model("nope").is_none());
+    }
+
+    #[test]
+    fn bare_folder_is_not_installed() {
+        let cache = scratch("bare");
+        // A folder with no .onnx (aborted/partial download) must read as absent.
+        let e = FastEmbedder::new(cache.clone(), default_model());
+        std::fs::create_dir_all(e.model_dir().join("blobs")).unwrap();
+        assert!(!e.is_installed());
+        assert!(!e.status().installed);
+        std::fs::remove_dir_all(&cache).ok();
+    }
+
+    #[test]
+    fn remove_clears_only_the_active_model() {
+        let cache = scratch("lifecycle");
+        seed_model(&cache, "models--Xenova--bge-small-en-v1.5", 2048); // active (default)
+        seed_model(&cache, "models--Qdrant--all-MiniLM-L6-v2-onnx", 1024); // a different model
+        std::fs::create_dir_all(cache.join("keep-me")).unwrap();
+
+        let e = FastEmbedder::new(cache.clone(), default_model());
+        let before = e.status();
+        assert_eq!(before.active_model_id, "bge-small");
+        assert!(before.installed);
+        assert!(before.size_bytes >= 2048, "size {} too small", before.size_bytes);
+
+        let after = e.remove_files().unwrap();
+        assert!(!after.installed);
+        assert_eq!(after.size_bytes, 0);
+        assert!(!cache.join("models--Xenova--bge-small-en-v1.5").exists());
+        // Other installed models and unrelated entries are untouched.
+        assert!(cache.join("models--Qdrant--all-MiniLM-L6-v2-onnx").exists());
+        assert!(cache.join("keep-me").exists());
+        std::fs::remove_dir_all(&cache).ok();
+    }
+
+    #[test]
+    fn switching_model_changes_dir_and_installed_view() {
+        let cache = scratch("switch");
+        // Only MiniLM is on disk.
+        seed_model(&cache, "models--Qdrant--all-MiniLM-L6-v2-onnx", 512);
+        let e = FastEmbedder::new(cache.clone(), default_model());
+        assert!(!e.is_installed(), "bge-small isn't installed");
+
+        e.set_choice(find_model("minilm-l6").unwrap());
+        assert_eq!(e.current_choice().id, "minilm-l6");
+        assert!(e.is_installed(), "minilm dir exists → installed after switch");
+        assert!(e.model_dir().ends_with("models--Qdrant--all-MiniLM-L6-v2-onnx"));
+
+        // list_models reflects per-model install state regardless of active one.
+        let list = e.list_models();
+        let minilm = list.iter().find(|m| m.id == "minilm-l6").unwrap();
+        let bge = list.iter().find(|m| m.id == "bge-small").unwrap();
+        assert!(minilm.installed && !bge.installed);
+        std::fs::remove_dir_all(&cache).ok();
     }
 
     #[test]

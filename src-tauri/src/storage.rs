@@ -258,6 +258,14 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX idx_chunks_doc ON chunks(document_id);
     ALTER TABLE documents ADD COLUMN embedded_at TEXT;",
+    // v11 — app_settings: a tiny key/value store for backend-owned prefs that
+    // must be known at startup. First use: the active embedding-model id (the
+    // chunk index is single-model, so changing it wipes + re-embeds — see
+    // `clear_index_for_reembed`). Keys are opaque strings; absent = default.
+    "CREATE TABLE app_settings (
+        key   TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL
+    );",
 ];
 
 /// Open-time setup: pragmas + migrations. Call once per connection.
@@ -1098,6 +1106,39 @@ pub fn all_chunk_embeddings(conn: &Connection) -> Result<Vec<ChunkVec>> {
     Ok(out)
 }
 
+/// Read an app-setting value; `None` when unset.
+pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        [key],
+        |r| r.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+/// Upsert an app-setting.
+pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![key, value],
+    )?;
+    Ok(())
+}
+
+/// Wipe the entire chunk index and mark every document for re-embedding. Used
+/// when the active embedding model changes: vectors from different models aren't
+/// comparable, so the whole index is rebuilt with the new model on the next
+/// worker pass (which only runs once that model is installed).
+pub fn clear_index_for_reembed(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DELETE FROM chunks;
+         UPDATE documents SET embedded_at = NULL;",
+    )?;
+    Ok(())
+}
+
 /// Document ids that need (re)embedding: never embedded, or edited since. Ideas
 /// are excluded (plan D6). The parentheses keep a NULL `embedded_at` from
 /// leaking an idea through the OR.
@@ -1931,6 +1972,33 @@ mod tests {
             [&doc.id],
         )
         .unwrap();
+        assert_eq!(docs_needing_embedding(&conn).unwrap(), vec![doc.id]);
+    }
+
+    #[test]
+    fn app_settings_roundtrip_and_upsert() {
+        let conn = test_conn();
+        assert_eq!(get_setting(&conn, "embed_model").unwrap(), None);
+        set_setting(&conn, "embed_model", "bge-base").unwrap();
+        assert_eq!(get_setting(&conn, "embed_model").unwrap().as_deref(), Some("bge-base"));
+        // A second write to the same key updates rather than erroring on the PK.
+        set_setting(&conn, "embed_model", "minilm-l6").unwrap();
+        assert_eq!(get_setting(&conn, "embed_model").unwrap().as_deref(), Some("minilm-l6"));
+    }
+
+    #[test]
+    fn clear_index_for_reembed_wipes_chunks_and_redirties() {
+        let conn = test_conn();
+        let doc = create_document(&conn, "Doc", None, Some("body")).unwrap();
+        // Index it: one chunk, stamped clean.
+        let vec384 = vec![0.5f32; 384];
+        replace_chunks(&conn, &doc.id, &[(0, "body", vec384.as_slice())], &doc.updated_at).unwrap();
+        assert_eq!(all_chunk_embeddings(&conn).unwrap().len(), 1);
+        assert!(docs_needing_embedding(&conn).unwrap().is_empty());
+
+        // A model switch wipes the index and re-dirties every doc.
+        clear_index_for_reembed(&conn).unwrap();
+        assert!(all_chunk_embeddings(&conn).unwrap().is_empty());
         assert_eq!(docs_needing_embedding(&conn).unwrap(), vec![doc.id]);
     }
 }

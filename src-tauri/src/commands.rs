@@ -381,6 +381,75 @@ pub fn delete_tavily_key(app: AppHandle) -> Result<()> {
     ai::delete_tavily_key(&app)
 }
 
+/// Current on-disk state of the local semantic-search model (installed? where?
+/// how big?), for the Settings "Semantic notebook" panel.
+#[tauri::command]
+pub fn embed_model_status(embed: State<EmbedState>) -> Result<crate::embed::ModelStatus> {
+    Ok(embed.embedder.status())
+}
+
+/// Explicitly download + load the local model, then nudge the worker to index
+/// any docs that were waiting on it. Runs the (slow, network-bound) load off the
+/// async reactor. This is the only path that fetches the model.
+#[tauri::command]
+pub async fn download_embed_model(embed: State<'_, EmbedState>) -> Result<crate::embed::ModelStatus> {
+    let embedder = embed.embedder.clone();
+    tauri::async_runtime::spawn_blocking(move || embedder.ensure_loaded())
+        .await
+        .map_err(|e| Error::Embed(format!("download task join: {e}")))??;
+    // Backfill anything left dirty while the model was absent.
+    let _ = embed.tx.try_send(());
+    Ok(embed.embedder.status())
+}
+
+/// Delete the active model's files. Stored chunks are kept, so search still
+/// works on already-indexed docs; only new/edited docs stall until a model is
+/// downloaded again.
+#[tauri::command]
+pub fn remove_embed_model(embed: State<EmbedState>) -> Result<crate::embed::ModelStatus> {
+    embed.embedder.remove_files()
+}
+
+/// The curated model catalog for the Settings dropdown, each with its installed
+/// flag resolved for this machine.
+#[tauri::command]
+pub fn list_embed_models(embed: State<EmbedState>) -> Result<Vec<crate::embed::EmbedModelInfo>> {
+    Ok(embed.embedder.list_models())
+}
+
+/// The id of the currently-active embedding model.
+#[tauri::command]
+pub fn get_embed_model(embed: State<EmbedState>) -> Result<String> {
+    Ok(embed.embedder.current_choice().id.to_string())
+}
+
+/// Switch the active embedding model. Since vectors from different models aren't
+/// comparable, this wipes the chunk index and marks every doc for re-embedding
+/// (atomically with persisting the choice), then nudges the worker — which
+/// re-indexes only once the newly-selected model is installed. No-op (and no
+/// wipe) if the model is already active.
+#[tauri::command]
+pub fn set_embed_model(
+    db: State<Db>,
+    embed: State<EmbedState>,
+    id: String,
+) -> Result<crate::embed::ModelStatus> {
+    let choice = crate::embed::find_model(&id)
+        .ok_or_else(|| Error::InvalidInput(format!("unknown embedding model: {id}")))?;
+    if embed.embedder.current_choice().id != choice.id {
+        db.with_mut(|conn| {
+            let tx = conn.transaction()?;
+            storage::set_setting(&tx, "embed_model", choice.id)?;
+            storage::clear_index_for_reembed(&tx)?;
+            tx.commit()?;
+            Ok(())
+        })?;
+        embed.embedder.set_choice(choice);
+        let _ = embed.tx.try_send(());
+    }
+    Ok(embed.embedder.status())
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn send_assistant_message(

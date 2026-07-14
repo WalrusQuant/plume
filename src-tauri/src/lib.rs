@@ -31,6 +31,13 @@ pub fn run() {
             }
             let conn = Connection::open(&db_path)?;
             storage::init(&conn)?;
+            // Resolve the active embedding model (Settings → Local search) before
+            // the connection is handed to Db. Unknown/absent id → the default.
+            let embed_choice = storage::get_setting(&conn, "embed_model")
+                .ok()
+                .flatten()
+                .and_then(|id| embed::find_model(&id))
+                .unwrap_or_else(embed::default_model);
             app.manage(Db(Mutex::new(conn)));
             app.manage(ai::AiState::default());
 
@@ -38,7 +45,7 @@ pub fn run() {
             // sync. It owns its own DB connection (never the Db mutex) and the
             // one shared embedding model; writes nudge it via the channel.
             let (tx, rx) = tokio::sync::mpsc::channel::<()>(8);
-            let embedder = std::sync::Arc::new(embed::FastEmbedder::new(data_dir.clone()));
+            let embedder = std::sync::Arc::new(embed::FastEmbedder::new(data_dir.clone(), embed_choice));
             app.manage(embed::EmbedState {
                 tx,
                 embedder: embedder.clone(),
@@ -90,6 +97,12 @@ pub fn run() {
             commands::set_tavily_key,
             commands::has_tavily_key,
             commands::delete_tavily_key,
+            commands::embed_model_status,
+            commands::download_embed_model,
+            commands::remove_embed_model,
+            commands::list_embed_models,
+            commands::get_embed_model,
+            commands::set_embed_model,
             commands::send_assistant_message,
             commands::send_inline_edit,
             commands::send_idea_expand,

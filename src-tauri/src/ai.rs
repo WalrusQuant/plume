@@ -866,7 +866,18 @@ async fn run_semantic_search(app: &AppHandle, query: &str) -> String {
     };
     let embedder = embed_state.embedder.clone();
 
-    // Embed the query off the async reactor (CPU-blocking; may lazy-load the model).
+    // Never download on the chat path: the local model is opt-in via Settings.
+    // If it isn't installed, tell the model to say so rather than blocking the
+    // reply on a ~128 MB fetch the user didn't ask for.
+    if !embedder.is_installed() {
+        return "The local search model isn't installed, so notes can't be \
+            searched. Tell the user to download it in Settings → Semantic notebook \
+            model to enable searching their own notes."
+            .to_string();
+    }
+
+    // Embed the query off the async reactor (CPU-blocking; loads the model on
+    // first use — already downloaded, since the guard above required it).
     let owned = query.to_string();
     let qvec = match tokio::task::spawn_blocking(move || embedder.embed_query(&owned)).await {
         Ok(Ok(v)) => v,
@@ -889,8 +900,12 @@ async fn run_semantic_search(app: &AppHandle, query: &str) -> String {
         return "No notes indexed yet — the user has no searchable documents.".to_string();
     }
 
+    // Defensive: only rank chunks of the query's dimension. Switching models
+    // wipes the index, so this should always match — but a chunk left from a
+    // different model (e.g. a crash mid-switch) would otherwise skew cosine.
     let mut scored: Vec<(f32, &crate::storage::ChunkVec)> = chunks
         .iter()
+        .filter(|c| c.embedding.len() == qvec.len())
         .map(|c| (crate::embed::cosine(&qvec, &c.embedding), c))
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
