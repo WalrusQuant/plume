@@ -93,6 +93,12 @@ export interface ModelStatus {
   sizeBytes: number;
 }
 
+/** Outcome of importing external files: docs created + files skipped. */
+export interface ImportResult {
+  imported: Document[];
+  failed: { file: string; message: string }[];
+}
+
 /** A curated embedding model as shown in the Settings dropdown. */
 export interface EmbedModelInfo {
   id: string;
@@ -203,6 +209,10 @@ export const api = {
   listEmbedModels: () => invoke<EmbedModelInfo[]>("list_embed_models"),
   getEmbedModel: () => invoke<string>("get_embed_model"),
   setEmbedModel: (id: string) => invoke<ModelStatus>("set_embed_model", { id }),
+
+  /** Import external files (md/txt/pdf/docx) as new documents. */
+  importDocuments: (paths: string[]) =>
+    invoke<ImportResult>("import_documents", { paths }),
 
   sendAssistantMessage: (
     streamId: string,

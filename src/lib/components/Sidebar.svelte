@@ -17,6 +17,7 @@
     onSelect: (id: string) => void;
     onGoHome: () => void;
     onNewDocument: () => void;
+    onImport: () => void;
     onNewIdea: () => void;
     onOpenIdea: (id: string) => void;
     onExpandIdea: (id: string, type: DocType, label: string) => void;
@@ -41,6 +42,7 @@
     onSelect,
     onGoHome,
     onNewDocument,
+    onImport,
     onNewIdea,
     onOpenIdea,
     onExpandIdea,
@@ -571,6 +573,13 @@
   <div class="sidebar-section-header">
     <span class="sidebar-section-label">Documents</span>
     <div class="sidebar-section-actions">
+      <button class="sidebar-new-btn" onclick={onImport} title="Import files (Markdown, text, PDF, Word)">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </button>
       <button class="sidebar-new-btn" onclick={() => void handleNewFolder()} title="New folder">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />

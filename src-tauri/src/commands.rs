@@ -351,6 +351,76 @@ pub fn get_snapshot_content(db: State<Db>, snapshot_id: String) -> Result<String
     db.with(|conn| storage::get_snapshot_content(conn, &snapshot_id))
 }
 
+/// One file that couldn't be imported, with a user-facing reason.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportFailure {
+    pub file: String,
+    pub message: String,
+}
+
+/// Outcome of an import: the docs created, plus any files that were skipped.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub imported: Vec<Document>,
+    pub failed: Vec<ImportFailure>,
+}
+
+/// Import external files (md/txt/pdf/docx) as new documents. Each file's text is
+/// extracted and stored as a generic doc (name = filename stem); the embed worker
+/// then indexes them. A file that can't be read — unsupported type, encrypted or
+/// scanned PDF (no text), corrupt docx — is skipped and reported in `failed`, so
+/// one bad file never aborts the batch.
+#[tauri::command]
+pub fn import_documents(
+    db: State<Db>,
+    embed: State<EmbedState>,
+    paths: Vec<String>,
+) -> Result<ImportResult> {
+    let mut imported = Vec::new();
+    let mut failed = Vec::new();
+    for path_str in &paths {
+        let path = std::path::Path::new(path_str);
+        let label = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Imported")
+            .to_string();
+        match crate::import::extract_text(path) {
+            Ok(text) if text.trim().is_empty() => failed.push(ImportFailure {
+                file: label,
+                message: "no readable text found in the file".into(),
+            }),
+            Ok(text) => {
+                match db.with(|conn| {
+                    storage::create_document(conn, &name, Some(DocType::Generic), Some(&text))
+                }) {
+                    Ok(doc) => imported.push(doc),
+                    Err(e) => failed.push(ImportFailure {
+                        file: label,
+                        message: e.to_string(),
+                    }),
+                }
+            }
+            Err(e) => failed.push(ImportFailure {
+                file: label,
+                message: e.to_string(),
+            }),
+        }
+    }
+    // One nudge for the whole batch — the worker embeds every dirty doc in a pass.
+    if !imported.is_empty() {
+        let _ = embed.tx.try_send(());
+    }
+    Ok(ImportResult { imported, failed })
+}
+
 #[tauri::command]
 pub fn set_api_key(app: AppHandle, provider: Provider, key: String) -> Result<()> {
     ai::set_api_key(&app, provider, &key)

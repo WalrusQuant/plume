@@ -3,6 +3,7 @@ mod commands;
 mod embed;
 mod error;
 mod export;
+mod import;
 mod preview;
 mod storage;
 mod websearch;
@@ -103,6 +104,7 @@ pub fn run() {
             commands::list_embed_models,
             commands::get_embed_model,
             commands::set_embed_model,
+            commands::import_documents,
             commands::send_assistant_message,
             commands::send_inline_edit,
             commands::send_idea_expand,

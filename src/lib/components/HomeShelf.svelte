@@ -16,6 +16,7 @@
     onNewPage: (folderId: string | null) => void;
     onNewPlan: () => void;
     onNewIdea: () => void;
+    onImport: () => void;
     onToggleActive: (id: string, active: boolean) => void;
     /** Whether an AI provider key is set — drives the first-run setup nudge. */
     isConfigured: boolean;
@@ -34,6 +35,7 @@
     onNewPage,
     onNewPlan,
     onNewIdea,
+    onImport,
     onToggleActive,
     isConfigured,
     theme,
@@ -255,6 +257,15 @@
                 }}
               >
                 New plan
+              </button>
+              <button
+                class="shelf-menu-item"
+                onclick={() => {
+                  newMenuOpen = false;
+                  onImport();
+                }}
+              >
+                Import files…
               </button>
             </div>
           {/if}

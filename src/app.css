@@ -2461,6 +2461,41 @@ button:focus-visible {
   overflow-y: auto;
 }
 
+/* Drop-to-import overlay — shown while files are dragged over the window. */
+.import-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--editor-bg) 72%, transparent);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.import-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 40px;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-md, 8px);
+  background: var(--toolbar-bg);
+  color: var(--accent);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+.import-drop-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.import-drop-sub {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
 /* The assistant tabpanel must fill the pane so its input pins to the bottom and
    the message list scrolls inside it. The tabpanel div (.preview-panel-body) is
    otherwise unstyled and shrink-wraps, which left the input floating mid-pane. */

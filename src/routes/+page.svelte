@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
+  import { open } from "@tauri-apps/plugin-dialog";
   import type { EditorView } from "@codemirror/view";
   import { api, type DocType, type Document, type Folder } from "$lib/api";
   import { getTemplate } from "$lib/templates";
@@ -42,6 +44,8 @@
   const WELCOME_SEEDED_KEY = "markdown-welcome-seeded";
 
   let documents = $state<Document[]>([]);
+  /** True while files are being dragged over the window (drop-to-import hint). */
+  let dragOver = $state(false);
   let folders = $state<Folder[]>([]);
   let selectedDocId = $state<string | null>(null);
   /** Live text of the selected doc. Seeds the editor on remount ({#key});
@@ -353,6 +357,42 @@
   async function createDocumentFromDialog(name: string, type: DocType) {
     const doc = await createDocument(name, type);
     if (dialogFolderId) await moveDocument(doc.id, dialogFolderId);
+  }
+
+  const IMPORT_EXTENSIONS = ["md", "markdown", "txt", "text", "pdf", "docx"];
+
+  /** Import external files as documents: extract text, create docs, index them.
+      Reports skipped files, and opens the first successful import. */
+  async function importFiles(paths: string[]) {
+    if (paths.length === 0) return;
+    let result;
+    try {
+      result = await api.importDocuments(paths);
+    } catch (e) {
+      toast.error(`Import failed: ${formatError(e)}`);
+      return;
+    }
+    if (result.imported.length) {
+      documents = [...result.imported, ...documents];
+    }
+    for (const f of result.failed) {
+      toast.error(`Couldn't import ${f.file}: ${f.message}`);
+    }
+    if (result.imported.length) {
+      const n = result.imported.length;
+      toast.show(`Imported ${n} document${n === 1 ? "" : "s"}`, "info");
+      await selectDocument(result.imported[0].id);
+    }
+  }
+
+  /** Open a file picker and import whatever the user chooses. */
+  async function pickAndImport() {
+    const chosen = await open({
+      multiple: true,
+      filters: [{ name: "Documents", extensions: IMPORT_EXTENSIONS }],
+    });
+    if (!chosen) return; // cancelled
+    await importFiles(Array.isArray(chosen) ? chosen : [chosen]);
   }
 
   /** Back to the shelf: no document open. */
@@ -732,6 +772,31 @@
       loading = false;
     })();
 
+    // Drop files anywhere on the window to import them. dragDropEnabled is on in
+    // tauri.conf; the webview delivers enter/over/drop/leave with absolute paths.
+    let dragUnlisten: (() => void) | null = null;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "drop") {
+          dragOver = false;
+          const paths = event.payload.paths.filter((p) =>
+            IMPORT_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? ""),
+          );
+          if (paths.length === 0) {
+            if (event.payload.paths.length) {
+              toast.error("Unsupported file type — import md, txt, pdf, or docx.");
+            }
+            return;
+          }
+          void importFiles(paths);
+        } else if (event.payload.type === "leave") {
+          dragOver = false;
+        } else {
+          dragOver = true; // enter / over
+        }
+      })
+      .then((un) => (dragUnlisten = un));
+
     // beforeunload is a backstop (webview reloads); it can't await, so the real
     // quit-safety is the Tauri close hook below.
     const flush = () => void flushSave();
@@ -759,6 +824,7 @@
     return () => {
       window.removeEventListener("beforeunload", flush);
       closeUnlisten?.();
+      dragUnlisten?.();
       void flushSave();
       if (previewTimer) clearTimeout(previewTimer);
       if (exportStatusTimer) clearTimeout(exportStatusTimer);
@@ -780,6 +846,7 @@
     onSelect={(id) => run(selectDocument(id), "Opening document")}
     onGoHome={() => run(goHome(), "Home")}
     onNewDocument={() => openNewDocument()}
+    onImport={() => void pickAndImport()}
     onNewIdea={newIdea}
     onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
     onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
@@ -922,6 +989,7 @@
         onNewPage={(folderId) => openNewDocument("generic", folderId)}
         onNewPlan={() => openNewDocument("plan")}
         onNewIdea={newIdea}
+        onImport={() => void pickAndImport()}
         onToggleActive={(id, active) => run(toggleFolderActive(id, active), "Update project")}
         isConfigured={assistant.isConfigured}
         {theme}
@@ -930,4 +998,18 @@
       />
     {/if}
   </div>
+
+  {#if dragOver}
+    <div class="import-drop-overlay" aria-hidden="true">
+      <div class="import-drop-card">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        <p class="import-drop-title">Drop to import</p>
+        <span class="import-drop-sub">Markdown, text, PDF, or Word</span>
+      </div>
+    </div>
+  {/if}
 </div>

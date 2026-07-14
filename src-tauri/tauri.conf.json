@@ -15,7 +15,7 @@
         "title": "Plume",
         "width": 1280,
         "height": 800,
-        "dragDropEnabled": false
+        "dragDropEnabled": true
       }
     ],
     "security": {

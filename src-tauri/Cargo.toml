@@ -40,8 +40,8 @@ regex = "1"
 # (ort-download-binaries) keeps the release binary notarization-clean; model
 # download uses rustls to match the app's TLS stack.
 fastembed = { version = "4.9.1", default-features = false, features = ["ort-download-binaries", "hf-hub-rustls-tls"] }
-
-[dev-dependencies]
+pdf-extract = "0.12.0"
+quick-xml = "0.36"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [profile.release]
