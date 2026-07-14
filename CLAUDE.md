@@ -1,14 +1,16 @@
-# Plume — write once, publish everywhere
+# Plume — a local-first AI writing studio
 
-Local-first Tauri v2 desktop markdown writing app with an AI writing partner
-and per-platform export. Audience: content creators who write in markdown and
-publish to many places (blogs, newsletters, LinkedIn, X).
+Local-first Tauri v2 desktop markdown app. Write in markdown with an AI partner
+that knows your work: it **semantically searches everything you've written**
+(on-device embeddings), works with **reference documents you import** (Markdown /
+text / PDF / Word), helps you draft and edit, and adapts a finished piece for
+per-platform export. Audience: people who write in markdown and build in public.
 
-**Direction:** Plume has pivoted toward a "build in public" writing workspace
-(the publishing pipeline was cut). Internal planning/strategy notes (product
-direction, spec + milestone history, correction rules) are kept locally and
-are **not** part of the public repo — this file plus the code are the source
-of truth for contributors.
+**Direction:** a "build in public" writing workspace (the publishing pipeline was
+cut — output is copy/paste + export, no auto-post). Internal planning/strategy
+notes (product direction, spec + milestone history, correction rules) are kept
+locally and are **not** part of the public repo — this file plus the code are the
+source of truth for contributors.
 
 ## Stack
 
@@ -17,8 +19,10 @@ of truth for contributors.
   TypeScript, CodeMirror 6
 - **Backend:** rusqlite (bundled, WAL), comrak (default-features off),
   reqwest (rustls), uuid v4, chrono, anyhow, thiserror 2, keyring, docx-rs,
-  image + base64 (docx image embedding); `zip` is a dev-dep (export tests
-  inflate the produced .docx and assert the OOXML)
+  image + base64 (docx image embedding); **fastembed** (on-device embeddings,
+  `ort` static-linked, ort-download-binaries) for the semantic notebook;
+  **pdf-extract** (PDF import), **quick-xml** + **zip** (DOCX import — `zip` is
+  also used by export tests to inflate the produced .docx and assert the OOXML)
 - **Styling:** CSS custom properties design system in `src/app.css`
   (`data-theme` attr on `<html>`, light/dark) — **no Tailwind**
 - **Build:** pnpm + Vite; `pnpm tauri dev` to run
@@ -34,10 +38,16 @@ src-tauri/src/
   lib.rs        Tauri setup: DB at app_data_dir/markdown.db, command registry
   storage.rs    schema + PRAGMA user_version migrations (APPEND-ONLY list),
                 CRUD as plain fns over &Connection (testable) for docs/folders/
-                chats/chat_messages/snapshots; DocType enum, title_explicit +
-                folders.active flags, sort_order (manual reorder), chat_messages
-                .raw_content (compaction content-blocks, migration v9)
-  commands.rs   thin #[tauri::command] wrappers; Db(Mutex<Connection>) state
+                chats/chat_messages/snapshots; DocType enum (incl. idea, source),
+                title_explicit + folders.active flags, sort_order (manual
+                reorder), chat_messages.raw_content (compaction blocks, v9),
+                chunks table + documents.embedded_at (semantic index, v10),
+                app_settings KV (v11, e.g. active embed model);
+                get/set_setting, all_chunk_embeddings, docs_needing_embedding,
+                replace_chunks, clear_index_for_reembed
+  commands.rs   thin #[tauri::command] wrappers; Db(Mutex<Connection>) state.
+                Also embed-model cmds (status/download/remove/list/get/set) and
+                import_documents (extract → create doc → nudge embed worker)
   preview.rs    comrak options + render_html (frontmatter stripped, raw HTML
                 escaped — preview pane has IPC access, keep it escaped)
   ai.rs         providers (Anthropic /v1/messages + OpenRouter
@@ -47,7 +57,22 @@ src-tauri/src/
                 expand, content multiply), each with its own system prompt;
                 voice_section() injects the global Voice & tone into all.
                 Anthropic server-side compaction (beta compact-2026-01-12) on
-                the chat path; system-prompt caching; token usage parsed from SSE
+                the chat path; system-prompt caching; token usage parsed from SSE.
+                Chat is an agentic tool loop (both providers) with two tools:
+                web_search (Tavily, via websearch.rs) and search_notes (semantic
+                RAG over the user's docs). run_semantic_search guards on model
+                installed + dim-matches the query; both default OFF per chat.
+  embed.rs      semantic notebook: chunk_document (block-boundary chunking,
+                capped at CHUNK_MAX_WORDS so nothing overruns the ~512-token
+                model window), the Embedder trait + fastembed-backed
+                FastEmbedder (CURATED_MODELS catalog, per-model dim/prefixes,
+                opt-in download only via ensure_loaded), embedding BLOB (de)ser,
+                and the background indexing worker (own DB conn, never the Db
+                mutex; nudged by writes)
+  import.rs     extract_text(path) by extension — md/txt verbatim, PDF via
+                pdf-extract (catch_unwind-guarded), DOCX via zip + quick-xml
+                <w:t> runs. Best-effort/lossy; empty output = a failed import
+  websearch.rs  Tavily client (BYOK) for the web_search tool
   export/       one renderer per publish target, all fed by the same comrak
                 parse. mod.rs holds the TARGETS list + ExportOutput enum
                 (Clipboard plain / ClipboardHtml rich-paste / File / Cancelled).
@@ -72,19 +97,26 @@ src/
   lib/ideaExpand.svelte.ts  idea-inbox expansion stream controller
   lib/multiply.svelte.ts    content-multiplication controller (source doc →
                         per-target platform variants, sequential streams)
-  lib/buildSidebarTree.ts   folder/doc/Inbox tree assembly for the sidebar
-                        (each section sorted by sort_order)
-  lib/documentTypes.ts  per-type metadata (icon, label) — add a type here
-  lib/templates.ts      starter bodies per document type
+  lib/buildSidebarTree.ts   folder/doc/Ideas/Sources tree assembly for the
+                        sidebar (each section sorted by sort_order; ideas AND
+                        sources are split out of the editable doc tree)
+  lib/documentTypes.ts  per-type metadata (label) + the DocType exhaustiveness
+                        guard — register/exclude a new type here
+  lib/templates.ts      starter bodies per document type (Record<DocType>)
   lib/editor/           CodeMirror setup: formatting.ts (toolbar commands),
                         themes.ts (light/dark)
   lib/toast.svelte.ts   error toasts — wrap new async UI ops in run(p, what)
   lib/components/       Svelte 5 components (props via $props, runes only).
                         Right pane is tabbed via RightPaneTabs.svelte:
-                        Preview / Assistant / History (HistoryPanel = snapshot
-                        restore). IdeaCaptureModal = quick-capture; MultiplyModal
-                        = target picker. HomeShelf = the project-shelf home shown
-                        when no doc is open (the shelf IS the nav — sidebar hides).
+                        Assistant (default) / Preview / History / Guide.
+                        HistoryPanel = snapshot restore; IdeaCaptureModal =
+                        quick-capture; MultiplyModal = target picker;
+                        ImportModal = documents-vs-sources picker on import;
+                        SourceViewerModal = read-only source view (+ remove /
+                        convert-to-doc); SettingsDialog is tabbed (AI | Local
+                        search — the embed-model download/remove + picker).
+                        HomeShelf = the project-shelf home when no doc is open
+                        (the shelf IS the nav — sidebar hides).
   routes/+page.svelte   app shell: doc state, debounced save (500ms) +
                         preview (150ms), export, settings, right-pane tab
 ```
@@ -93,12 +125,29 @@ src/
 
 - **DB migrations are append-only** — never edit a shipped entry in
   `storage.rs::MIGRATIONS`; add a new one.
-- Document `type` is a Rust enum (kebab-case serde); adding a type = one
-  variant + frontend `documentTypes.ts` entry, no migration.
+- Document `type` is a Rust enum (kebab-case serde); adding a type = one Rust
+  variant (enum + `as_str`/`parse`) + these frontend `Record<DocType>` sites or
+  it won't compile: `api.ts` union, `documentTypes.ts` (`DOCUMENT_TYPES` and the
+  `_EXHAUSTIVE` guard), `templates.ts`, `DocumentIcon.svelte`. No migration.
 - **Ideas are notes, not editor docs.** The `idea` DocType is captured and
   edited only through `IdeaCaptureModal` (never the main editor); it lives in
   the Inbox, and is promoted to a real doc via `update_document_type`. See the
   [[ideas-are-notes]] memory.
+- **Sources are read-only reference docs.** The `source` DocType is created only
+  by import (`import_documents` with `as_source`); it lives in the sidebar
+  "Sources" section, opens in `SourceViewerModal` (never the editor), and is
+  removed by delete (chunks cascade out of the index) or promoted via
+  `update_document_type`. Sources ARE embedded/searchable (non-idea). Keep them
+  out of the editable tree everywhere (buildSidebarTree, HomeShelf recent,
+  search-result click routing). See [[document-import-parked]].
+- **Semantic notebook is opt-in and single-model.** The embedding model is only
+  ever downloaded by the explicit Settings button (`ensure_loaded`) — the worker
+  and chat path never auto-download; they no-op if `!is_installed()`. Vectors
+  across models/dims aren't comparable, so switching the active model wipes +
+  re-embeds the whole index (`clear_index_for_reembed`); default stays bge-small
+  (384) so existing indexes remain valid. `chunk_document` caps chunks at
+  `CHUNK_MAX_WORDS` because models truncate past ~512 tokens. See
+  [[embed-model-opt-in]].
 - `title_explicit` (documents column) distinguishes a user-set title from a
   derived one (ideas default their name to the first line). The capture/rename
   paths set it; don't overwrite an explicit title with a derived one.
@@ -128,9 +177,10 @@ src/
 
 ## Testing / verification
 
-- `cargo test --manifest-path src-tauri/Cargo.toml` — storage/preview/export
-  unit tests (in-memory SQLite; no Tauri needed; docx tests inflate the output
-  zip and assert the OOXML). 90+ tests, keep them green.
+- `cargo test --manifest-path src-tauri/Cargo.toml` — storage/preview/export/
+  embed/import unit tests (in-memory SQLite; no Tauri needed; docx tests inflate
+  the output zip and assert the OOXML; embed/import tests use temp dirs). 150+
+  tests, keep them green.
 - `pnpm check` — svelte-check must stay at 0 errors/0 warnings.
 - `pnpm tauri dev` for live verification; SQLite lives at
   `~/Library/Application Support/com.adamwickwire.markdown/markdown.db`

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Plume — a digital markdown notebook with an AI writing partner</title>
-<meta name="description" content="A local-first digital markdown notebook. At its simplest, a fast and private editor with live preview. At its fullest, an AI writing partner that drafts, rewrites, and turns one piece of writing into content for every platform." />
+<title>Plume — a local-first AI writing studio</title>
+<meta name="description" content="A local-first AI writing studio. Write in markdown with an AI partner that actually knows your work — it searches everything you've written, reads the documents you bring in, helps you draft and edit, and reshapes a finished piece for wherever you publish. Everything stays on your machine." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -302,11 +302,12 @@
   </nav>
 
   <header class="hero">
-    <h1>The notebook that<br /><span class="grad">writes with you.</span></h1>
+    <h1>The writing studio that<br /><span class="grad">knows your work.</span></h1>
     <p class="sub">
-      Plume is a desktop markdown notebook with an AI partner built in. Capture
-      an idea, shape it into a draft in your voice, and export it anywhere —
-      all in one fast, private app.
+      Plume is a local-first markdown studio with an AI partner that actually
+      knows what you've written. It searches your own notes, reads the documents
+      you bring in, drafts and edits alongside you, and reshapes a finished piece
+      for wherever you publish — all on your machine.
     </p>
     <div class="cta-row">
       <a class="btn btn-primary" href="#get">Get Plume <span aria-hidden="true">→</span></a>
@@ -317,9 +318,9 @@
       <div class="window">
         <div class="titlebar">
           <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
-          <span class="label">plume — notebook.md</span>
+          <span class="label">plume — welcome.md</span>
         </div>
-        <img src="screenshot.png" alt="Plume — markdown editor with live preview, document shelf, and AI writing partner" />
+        <img src="screenshot-assistant.png" alt="Plume — markdown editor with an AI assistant that searches your own documents" />
       </div>
     </div>
   </header>
@@ -327,16 +328,16 @@
 
 <div class="strip">
   <span><b>Markdown</b> editor + live preview</span>
-  <span><b>AI</b> writing partner</span>
-  <span><b>Inline</b> rewrites</span>
+  <span><b>AI</b> that searches your notes</span>
+  <span><b>Bring in</b> PDF, Word &amp; markdown</span>
   <span><b>Write once</b>, multiply everywhere</span>
   <span><b>Local</b> &amp; private by default</span>
 </div>
 
 <section id="features" class="wrap">
-  <div class="eyebrow">As much, or as little, as you need</div>
-  <h2 class="section-title">A markdown notebook that grows with you</h2>
-  <p class="section-lede">Use it as a plain, fast markdown editor. Or let the AI partner carry a piece all the way from rough draft to content for every platform. Same app — your call, every time.</p>
+  <div class="eyebrow">Everything, on your machine</div>
+  <h2 class="section-title">An AI partner that knows what you've written</h2>
+  <p class="section-lede">Write in a fast, private markdown editor. Then let an AI partner search your own notes, work from documents you bring in, and carry a piece all the way to wherever you publish. Same app — your call, every time.</p>
 
   <div class="grid">
     <div class="card">
@@ -350,9 +351,24 @@
       <p>Streaming chat with your document as context. Multiple threads per doc, token usage shown, and a Voice &amp; tone you set once so everything sounds like you.</p>
     </div>
     <div class="card">
+      <div class="ico">⌕</div>
+      <h3>Search your notes</h3>
+      <p>The assistant semantically searches everything you've written and answers grounded in your own documents. A small embedding model runs entirely on your machine — nothing is sent out. Opt-in: download a model once in Settings.</p>
+    </div>
+    <div class="card">
+      <div class="ico">⤓</div>
+      <h3>Bring in your documents</h3>
+      <p>Import Markdown, plain text, PDF, and Word .docx — either as editable documents, or as read-only Sources the AI can search but you never touch. Add and remove them freely.</p>
+    </div>
+    <div class="card">
       <div class="ico">⌁</div>
       <h3>Inline edit</h3>
       <p>Select a sentence, get a streamed rewrite previewed right in place, then accept or reject — no round trip through a chat box.</p>
+    </div>
+    <div class="card">
+      <div class="ico">◍</div>
+      <h3>Web search, when you want it</h3>
+      <p>Toggle web search on in a chat and the assistant can pull in fresh information from the web. Off by default — it only reaches out when you ask it to.</p>
     </div>
     <div class="card">
       <div class="ico">⧉</div>
@@ -362,44 +378,44 @@
     <div class="card">
       <div class="ico">↗</div>
       <h3>Export anywhere</h3>
-      <p>Real Word .docx with heading styles, numbering, checkboxes, hyperlinks and tables. Plus X threads, LinkedIn-ready text, and clean self-contained HTML.</p>
+      <p>Real Word .docx with heading styles, numbering, checkboxes, hyperlinks and tables. Plus X threads and X Articles, LinkedIn-ready text, and clean self-contained HTML.</p>
     </div>
     <div class="card">
       <div class="ico">▢</div>
       <h3>Yours, locally</h3>
-      <p>Everything lives in a SQLite database on your machine. Bring your own API key — the only thing that leaves is what you send your AI provider.</p>
+      <p>Ideas inbox, version history, and folders keep everything in one SQLite database on your machine. Keys live in the macOS Keychain — the only thing that leaves is what you send your AI provider.</p>
     </div>
   </div>
 </section>
 
 <section id="how" class="wrap">
-  <div class="eyebrow">Write once, share anywhere</div>
+  <div class="eyebrow">Build in public</div>
   <h2 class="section-title">How it flows</h2>
   <p class="section-lede">Whatever you're writing — a journal entry, a blog post, a paper, a skill doc — start it once and take it all the way to wherever it needs to go.</p>
 
   <div class="flow">
     <div class="step">
       <div class="n">1</div>
-      <h4>Capture &amp; write</h4>
-      <p>Drop a half-formed thought into Ideas without losing your place, or just start writing in a fresh markdown doc.</p>
+      <h4>Capture &amp; gather</h4>
+      <p>Drop a half-formed thought into the Ideas inbox, start a fresh markdown doc, or bring in existing notes, PDFs, and Word files.</p>
     </div>
     <div class="step">
       <div class="n">2</div>
       <h4>Draft with AI</h4>
-      <p>Lean on the writing partner to shape rough notes into a real piece, in the voice you defined once.</p>
+      <p>The partner works from your document, your own notes, and any Sources you've added — writing in the voice you defined once.</p>
     </div>
     <div class="step">
       <div class="n">3</div>
       <h4>Reshape &amp; share</h4>
-      <p>Multiply one piece into a blog post, a thread, or a doc — then export clean to Word, HTML, or wherever you publish.</p>
+      <p>Multiply one piece into a blog post, a thread, or a doc, keep every version in history, then export clean to Word, HTML, or wherever you publish.</p>
     </div>
   </div>
 </section>
 
 <div class="wrap">
   <div id="get" class="closing">
-    <h2>Your notebook, your machine</h2>
-    <p>Plume is local-first and bring-your-own-key. No subscription, no lock-in — just a tool that gets out of your way.</p>
+    <h2>Your studio, your machine</h2>
+    <p>Plume is local-first and bring-your-own-key. Your writing, your notes, and the model that searches them all stay on your machine. No subscription, no lock-in — just a tool that gets out of your way.</p>
     <div class="cta-row">
       <a class="btn btn-primary" href="https://github.com/WalrusQuant/plume">View on GitHub <span aria-hidden="true">→</span></a>
     </div>
@@ -408,7 +424,7 @@
 
   <footer>
     <div class="brand"><span class="mark" style="width:26px;height:26px;font-size:15px;border-radius:7px;">P</span> Plume</div>
-    <div>Your digital markdown notebook. © 2026</div>
+    <div>Your local-first AI writing studio. © 2026</div>
   </footer>
 </div>
 
