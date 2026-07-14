@@ -2461,6 +2461,16 @@ button:focus-visible {
   overflow-y: auto;
 }
 
+/* The assistant tabpanel must fill the pane so its input pins to the bottom and
+   the message list scrolls inside it. The tabpanel div (.preview-panel-body) is
+   otherwise unstyled and shrink-wraps, which left the input floating mid-pane. */
+#right-panel-assistant {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ---------------------------------------------------------
    Settings Dialog Extras
    --------------------------------------------------------- */

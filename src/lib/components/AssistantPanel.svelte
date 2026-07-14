@@ -445,12 +445,14 @@
     bottom: calc(100% + 4px);
     max-height: 14rem;
     overflow-y: auto;
-    background: var(--bg-primary);
+    /* Match the app's dropdown surface — the previous --bg-primary token
+       doesn't exist, so the popover rendered transparent over the chat. */
+    background: var(--toolbar-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     padding: 0.25rem;
-    z-index: 20;
+    z-index: 50;
   }
   .mention-option {
     display: flex;
@@ -467,7 +469,7 @@
     font-size: 0.85rem;
   }
   .mention-option:hover {
-    background: var(--bg-secondary);
+    background: var(--shelf-hover);
   }
   .mention-option-name {
     white-space: nowrap;
@@ -487,7 +489,7 @@
     padding: 0.15rem 0.3rem 0.15rem 0.4rem;
     border: 1px solid var(--border);
     border-radius: 999px;
-    background: var(--bg-secondary);
+    background: var(--accent-surface);
     color: var(--text-primary);
     font-size: 0.75rem;
     max-width: 100%;
