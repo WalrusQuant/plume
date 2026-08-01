@@ -3,6 +3,7 @@
   import { api, type DocType, type Document, type Folder, type SearchHit } from "$lib/api";
   import { buildSidebarTree } from "$lib/buildSidebarTree";
   import { formatDate } from "$lib/formatDate";
+  import { shouldActivateFromKey } from "$lib/keyboardActivation";
   import { DOCUMENT_TYPES } from "$lib/documentTypes";
   import { MULTIPLY_TARGETS } from "$lib/multiplyTargets";
   import DocumentIcon from "$lib/components/DocumentIcon.svelte";
@@ -284,7 +285,7 @@
 
   /** Keyboard activation for clickable rows — Enter or Space (button parity). */
   function activateOn(e: KeyboardEvent, fn: () => void) {
-    if (e.key === "Enter" || e.key === " ") {
+    if (shouldActivateFromKey(e)) {
       e.preventDefault();
       fn();
     }
