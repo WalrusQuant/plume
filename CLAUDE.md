@@ -1,13 +1,13 @@
-# Plume — a local-first AI writing studio
+# Plume — a local-first AI notebook
 
 Local-first Tauri v2 desktop markdown app. Write in markdown with an AI partner
 that knows your work: it **semantically searches everything you've written**
 (on-device embeddings), works with **reference documents you import** (Markdown /
-text / PDF / Word), helps you draft and edit, and adapts a finished piece for
-per-platform export. Audience: people who write in markdown and build in public.
+text / PDF / Word), and helps you think, draft, and edit. Audience: people who
+keep notes, sources, and drafts in one local knowledge workspace.
 
-**Direction:** a "build in public" writing workspace (the publishing pipeline was
-cut — output is copy/paste + export, no auto-post). Internal planning/strategy
+**Direction:** an AI notebook / knowledge workspace (output is copy/paste +
+export, no auto-post). Internal planning/strategy
 notes (product direction, spec + milestone history, correction rules) are kept
 locally and are **not** part of the public repo — this file plus the code are the
 source of truth for contributors.
@@ -73,7 +73,7 @@ src-tauri/src/
                 pdf-extract (catch_unwind-guarded), DOCX via zip + quick-xml
                 <w:t> runs. Best-effort/lossy; empty output = a failed import
   websearch.rs  Tavily client (BYOK) for the web_search tool
-  export/       one renderer per publish target, all fed by the same comrak
+  export/       one renderer per export target, all fed by the same comrak
                 parse. mod.rs holds the TARGETS list + ExportOutput enum
                 (Clipboard plain / ClipboardHtml rich-paste / File / Cancelled).
                 Targets: linkedin.rs (Unicode-styled clipboard), x.rs (X thread

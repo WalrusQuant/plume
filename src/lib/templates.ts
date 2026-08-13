@@ -200,11 +200,11 @@ Steps to undo if something goes wrong.
 | Escalation | | |
 `;
 
-const planTemplate = `# Plan: [What you're building]
+const planTemplate = `# Plan: [What you're working on]
 
 ## Why
 
-The itch you're scratching, and who it's for. One paragraph.
+What this is for, and why it matters. One paragraph.
 
 ## Shape of done
 
@@ -218,17 +218,14 @@ Rough order, not a contract.
 2.
 3.
 
-## Worth writing about
-
-Moments in this build that could become posts.
+## Open questions
 
 -
 `;
 
-const buildLogTemplate = `# Build log: [Project]
+const buildLogTemplate = `# Build log: [Topic]
 
-Add a new dated section per session — this file is the raw ore your posts
-are mined from.
+Add a new dated section per session.
 
 ---
 
@@ -240,7 +237,7 @@ are mined from.
 
 **Learned:**
 
-**Post-worthy:**
+**Next:**
 `;
 
 const templates: Record<DocType, string> = {

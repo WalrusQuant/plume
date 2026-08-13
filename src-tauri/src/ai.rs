@@ -367,10 +367,10 @@ fn system_prompt(
     voice: Option<&str>,
 ) -> String {
     format!(
-        "You are the AI writing partner in Plume, a local-first desktop app for content \
-         creators who write in markdown and publish across platforms (blogs, \
-         newsletters, LinkedIn, X). The user is editing the document below — help them \
-         review, improve, or generate content. Be concise and direct. When you propose a \
+        "You are the AI partner in Plume, a local-first notebook and knowledge \
+         workspace. The user writes in markdown and keeps notes, sources, and drafts \
+         in one place. They are editing the document below — help them think, review, \
+         improve, or generate content. Be concise and direct. When you propose a \
          revised version of the whole document, give the complete markdown in a \
          ```markdown code block so it can be applied in one click.\n\n\
          Current document content:\n---\n{document_content}\n---{references}{web}{notes}{voice}",
@@ -386,7 +386,7 @@ fn system_prompt(
 /// code fences — so the result can be spliced straight back into the editor.
 fn inline_system_prompt(document_content: &str, selected_text: &str, voice: Option<&str>) -> String {
     format!(
-        "You are performing an inline edit inside Plume, a desktop writing app. Apply the \
+        "You are performing an inline edit inside Plume, a local-first AI notebook. Apply the \
          user's instruction to the selected text and return ONLY the replacement text — \
          no preamble, explanation, quotes, or code fences — ready to paste in place. \
          Match the surrounding markdown style.\n\n\
@@ -401,7 +401,7 @@ fn inline_system_prompt(document_content: &str, selected_text: &str, voice: Opti
 /// (no preamble, no code fences) so it can be written straight into a new doc.
 fn expand_system_prompt(idea: &str, target_label: &str, voice: Option<&str>) -> String {
     format!(
-        "You are the writing partner in Plume, a desktop app for content creators. The \
+        "You are the writing partner in Plume, a local-first AI notebook. The \
          user captured a rough idea and wants it expanded into a structured first draft \
          for a {target_label}. Develop the idea into a complete, well-organized markdown \
          draft: a clear angle, logical sections, and concrete substance — not filler. \
@@ -457,10 +457,9 @@ fn multiply_system_prompt(
     voice: Option<&str>,
 ) -> String {
     format!(
-        "You are the writing partner in Plume, a desktop app for content creators \
-         who write once and publish across platforms. The user has a FINISHED source \
-         document and wants a platform-native {target_label} derived from it: the same \
-         ideas, re-shaped for the platform's format and audience — not a copy of the \
+        "You are the writing partner in Plume, a local-first notebook and knowledge \
+         workspace. The user has a FINISHED source document and wants a {target_label} \
+         derived from it: the same ideas, re-shaped for that format — not a copy of the \
          original. {guidance} Return ONLY the markdown body of the {target_label}: no \
          preamble, no explanation, no surrounding code fences.\n\n\
          The source document:\n---\n{source}\n---{voice}",

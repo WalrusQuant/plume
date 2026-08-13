@@ -351,12 +351,12 @@
           <line x1="12" y1="19" x2="20" y2="19" />
         </svg>
         <h2>Welcome to Plume</h2>
-        <p>Write in markdown, then let AI reshape a finished piece into a version
-          for every platform. A <strong>project</strong> keeps a piece and its
-          versions together; <strong>Ideas</strong> holds quick notes you can
-          expand into drafts later.</p>
+        <p>A local-first AI notebook. Capture notes, import sources, and let an
+          assistant search everything you've gathered. A <strong>project</strong>
+          keeps related documents together; <strong>Ideas</strong> holds quick
+          notes you can expand later.</p>
         <div class="shelf-empty-actions">
-          <button class="shelf-empty-btn" onclick={startNewProject} title="Group a piece and its platform versions">Start a project</button>
+          <button class="shelf-empty-btn" onclick={startNewProject} title="Group related documents in one project">Start a project</button>
           <button class="shelf-empty-btn" onclick={onNewPlan} title="A structured plan document">Write a plan</button>
           <button class="shelf-empty-btn" onclick={() => onNewPage(null)} title="A blank markdown document">New document</button>
           <button class="shelf-empty-btn" onclick={onNewIdea} title="A quick note for Ideas">Capture an idea</button>

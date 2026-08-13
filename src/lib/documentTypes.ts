@@ -6,7 +6,7 @@ export interface DocumentTypeConfig {
   description: string;
 }
 
-/** Blank first, then creator types (the product pitch), then agent-file bonus tier. */
+/** Blank first, then common writing types, then agent-file templates. */
 export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
   {
     type: "generic",
@@ -36,12 +36,12 @@ export const DOCUMENT_TYPES: DocumentTypeConfig[] = [
   {
     type: "plan",
     label: "Plan",
-    description: "Lightweight build plan — the start of a build-in-public loop",
+    description: "A structured plan for a project or piece of work",
   },
   {
     type: "build-log",
     label: "Build Log",
-    description: "Dated working notes — raw material for posts",
+    description: "Dated working notes — a running record of what you did and learned",
   },
   {
     type: "skill",

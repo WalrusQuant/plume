@@ -1,7 +1,7 @@
 [package]
 name = "markdown"
 version = "0.1.0"
-description = "Local-first markdown writing app — write once, publish everywhere"
+description = "Local-first AI notebook — markdown notes, sources, and an assistant that searches them"
 authors = ["Adam Wickwire"]
 edition = "2021"
 

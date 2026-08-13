@@ -1,11 +1,11 @@
 # Plume
 
-**A local-first AI writing studio.** Write in markdown with an AI partner that
+**A local-first AI notebook.** Write in markdown with an AI partner that
 actually knows your work — it can semantically search everything you've written,
-bring in reference documents you drop on it, help you draft and edit, and adapt a
-finished piece for wherever you publish. Everything stays on your machine.
+bring in reference documents you drop on it, and help you think, draft, and
+edit. Everything stays on your machine.
 
-Built for people who write in markdown and build in public.
+A knowledge workspace for notes, sources, and drafts.
 
 ![Plume — the markdown editor with an AI assistant that searches your own documents](docs/screenshot.png)
 
@@ -17,7 +17,7 @@ Built for people who write in markdown and build in public.
   rendered by the same engine that drives every export, plus per-platform
   previews (LinkedIn, X thread, X Article) that show exactly what the clipboard
   export will paste
-- **AI writing partner** — streaming chat with your document as context;
+- **AI partner** — streaming chat with your document as context;
   **multiple conversations per document** with token usage shown; threads
   persist across restarts; insert suggestions at the cursor or replace the whole
   document with one click. Works with **Anthropic** or **OpenRouter** (any model
@@ -125,10 +125,10 @@ v3 (current): a **local semantic notebook** — on-device embeddings, "search yo
 notes," a curated opt-in model picker, and **document import** (Markdown / text /
 PDF / Word) as editable docs or searchable Sources.
 
-Direction: Plume is a markdown workspace for **building in public** — plan a
-project, keep its build log, let the AI work across everything you've written,
-and turn that real work into quality posts in your voice. Output stays copy/paste
-+ export; there is no publishing pipeline.
+Direction: Plume is a local-first **AI notebook and knowledge workspace** —
+capture notes and sources, let the AI search everything you've gathered, and
+draft and edit in markdown. Output stays copy/paste + export; there is no
+publishing pipeline.
 
 ## License
 

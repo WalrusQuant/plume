@@ -10,10 +10,10 @@ export const WELCOME_DOC_TITLE = "Welcome to Plume";
 // so this template literal stays a plain string.
 export const WELCOME_DOC_BODY = `# Welcome to Plume 👋
 
-Plume is a **local-first AI writing studio** for people who build in public. You
-write in markdown, an AI partner drafts and edits alongside you, and it can
-search your own notes — all on your machine. Nothing leaves your computer unless
-you send it.
+Plume is a **local-first AI notebook** — a knowledge workspace for your notes,
+sources, and drafts. You write in markdown, an AI partner thinks and edits
+alongside you, and it can search your own notes — all on your machine. Nothing
+leaves your computer unless you send it.
 
 This is a real document. Play with it, rewrite it, or delete it when you're
 ready — nothing here is special.
@@ -90,7 +90,7 @@ function greet(name) {
 | ------------------ | ----------------- |
 | Live preview       | Preview tab       |
 | Markdown syntax    | Guide tab         |
-| AI writing partner | Assistant tab     |
+| AI partner         | Assistant tab     |
 | Search your notes  | Settings → Local search |
 | Version history    | History tab       |
 
