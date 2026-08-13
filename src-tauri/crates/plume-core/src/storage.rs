@@ -393,6 +393,47 @@ pub fn create_document(
     get_document(conn, &id)
 }
 
+/// Create a document and optionally file it in a project in one transaction.
+/// The given name is treated as explicit so an agent-supplied title is not
+/// later overwritten by derived-name logic.
+pub fn create_document_in_folder(
+    conn: &Connection,
+    name: &str,
+    doc_type: Option<DocType>,
+    content: Option<&str>,
+    folder_id: Option<&str>,
+) -> Result<Document> {
+    let name = validated_name(name)?;
+    if let Some(fid) = folder_id {
+        let exists: Option<i64> = conn
+            .query_row("SELECT 1 FROM folders WHERE id = ?1", [fid], |r| r.get(0))
+            .optional()?;
+        if exists.is_none() {
+            return Err(Error::NotFound("folder"));
+        }
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let ts = now();
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO documents
+            (id, name, type, folder_id, content, created_at, updated_at, title_explicit, sort_order)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1,
+                 COALESCE((SELECT MIN(sort_order) FROM documents), 1) - 1)",
+        rusqlite::params![
+            id,
+            name,
+            doc_type.unwrap_or(DocType::Generic).as_str(),
+            folder_id,
+            content.unwrap_or(""),
+            ts
+        ],
+    )?;
+    fts_index(&tx, &id)?;
+    tx.commit()?;
+    get_document(conn, &id)
+}
+
 pub fn rename_document(conn: &Connection, id: &str, name: &str) -> Result<Document> {
     let name = validated_name(name)?;
     // A rename is always a deliberate act → the name becomes explicit.
@@ -1043,7 +1084,7 @@ pub fn replace_chunks(
                 document_id,
                 *ordinal as i64,
                 content,
-                crate::embed::embedding_to_blob(embedding),
+                crate::embed_blob::embedding_to_blob(embedding),
                 created,
             ],
         )?;
@@ -1105,7 +1146,7 @@ pub fn all_chunk_embeddings(conn: &Connection) -> Result<Vec<ChunkVec>> {
             document_id,
             doc_name,
             content,
-            embedding: crate::embed::blob_to_embedding(&blob)?,
+            embedding: crate::embed_blob::blob_to_embedding(&blob)?,
         });
     }
     Ok(out)
@@ -1810,6 +1851,27 @@ mod tests {
     }
 
     #[test]
+    fn create_document_in_folder_files_and_marks_title_explicit() {
+        let conn = test_conn();
+        let folder = create_folder(&conn, "Project").unwrap();
+        let doc = create_document_in_folder(
+            &conn,
+            "The plan",
+            Some(DocType::Plan),
+            Some("# Plan\n"),
+            Some(&folder.id),
+        )
+        .unwrap();
+        assert_eq!(doc.folder_id.as_deref(), Some(folder.id.as_str()));
+        assert_eq!(doc.doc_type, DocType::Plan);
+        assert!(doc.title_explicit);
+        assert_eq!(get_document_content(&conn, &doc.id).unwrap(), "# Plan\n");
+
+        let missing = create_document_in_folder(&conn, "X", None, None, Some("no-such"));
+        assert!(matches!(missing, Err(Error::NotFound("folder"))));
+    }
+
+    #[test]
     fn move_document_lands_at_top() {
         let conn = test_conn();
         let folder = create_folder(&conn, "F").unwrap();
@@ -1883,63 +1945,37 @@ mod tests {
         assert_eq!(folders.iter().find(|f| f.id == "fb").unwrap().sort_order, 1);
     }
 
-    /// Embed two documents with the deterministic `FakeEmbedder`, store their
-    /// chunks, then rank the whole index against a query by cosine — the doc
-    /// that shares the query's vocabulary must come out on top. Exercises the
-    /// full chunk → embed → replace_chunks → all_chunk_embeddings round-trip
-    /// (BLOB encode/decode included) with no model download.
+    /// replace_chunks + all_chunk_embeddings round-trip the BLOB, stamp
+    /// embedded_at, and deleting a document cascades its chunks (real FK).
     #[test]
-    fn semantic_ranking_end_to_end() {
-        use crate::embed::{self, Embedder, FakeEmbedder};
+    fn chunk_blob_roundtrip_and_delete_cascades() {
         let conn = test_conn();
-        let embedder = FakeEmbedder;
+        let rust_doc = create_document(&conn, "Rust Notes", None, Some("rust")).unwrap();
+        let bread_doc = create_document(&conn, "Baking Notes", None, Some("bread")).unwrap();
 
-        let rust_doc = create_document(
+        let rust_vec = vec![1.0f32, 0.0, 0.0];
+        let bread_vec = vec![0.0f32, 1.0, 0.0];
+        replace_chunks(
             &conn,
-            "Rust Notes",
-            None,
-            Some("# Borrow checker\nRust ownership lifetimes borrow checker move semantics."),
+            &rust_doc.id,
+            &[(0, "rust", rust_vec.as_slice())],
+            &rust_doc.updated_at,
         )
         .unwrap();
-        let bread_doc = create_document(
+        replace_chunks(
             &conn,
-            "Baking Notes",
-            None,
-            Some("# Sourdough\nBread flour water starter fermentation crumb crust."),
+            &bread_doc.id,
+            &[(0, "bread", bread_vec.as_slice())],
+            &bread_doc.updated_at,
         )
         .unwrap();
 
-        for doc in [&rust_doc, &bread_doc] {
-            let (content, updated_at) = content_for_embedding(&conn, &doc.id).unwrap();
-            let texts = embed::chunk_document(&content);
-            assert!(!texts.is_empty());
-            let vecs = embedder.embed_passages(&texts).unwrap();
-            let rows: Vec<(usize, &str, &[f32])> = texts
-                .iter()
-                .zip(&vecs)
-                .enumerate()
-                .map(|(i, (t, v))| (i, t.as_str(), v.as_slice()))
-                .collect();
-            replace_chunks(&conn, &doc.id, &rows, &updated_at).unwrap();
-        }
-
-        // embedded_at got stamped; both docs leave the "needs embedding" set.
         assert!(docs_needing_embedding(&conn).unwrap().is_empty());
+        let loaded = all_chunk_embeddings(&conn).unwrap();
+        assert_eq!(loaded.len(), 2);
+        let rust = loaded.iter().find(|c| c.doc_name == "Rust Notes").unwrap();
+        assert_eq!(rust.embedding, rust_vec);
 
-        // Rank the corpus against a Rust query.
-        let q = embedder
-            .embed_query("how does the borrow checker enforce ownership")
-            .unwrap();
-        let mut ranked = all_chunk_embeddings(&conn).unwrap();
-        assert_eq!(ranked.len(), 2);
-        ranked.sort_by(|a, b| {
-            embed::cosine(&q, &b.embedding)
-                .partial_cmp(&embed::cosine(&q, &a.embedding))
-                .unwrap()
-        });
-        assert_eq!(ranked[0].doc_name, "Rust Notes");
-
-        // Deleting a document cascades its chunks away (real FK, unlike fts).
         delete_document(&conn, &rust_doc.id).unwrap();
         let remaining = all_chunk_embeddings(&conn).unwrap();
         assert_eq!(remaining.len(), 1);

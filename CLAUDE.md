@@ -34,6 +34,10 @@ One comrak parse (options in `src-tauri/src/preview.rs::options()`) feeds:
 second markdown engine.
 
 ```
+src-tauri/crates/
+  plume-core    storage.rs + error.rs + default_db_path (app + MCP share this)
+  plume-mcp     stdio MCP server so coding agents can read/write plans
+
 src-tauri/src/
   lib.rs        Tauri setup: DB at app_data_dir/markdown.db, command registry
   storage.rs    schema + PRAGMA user_version migrations (APPEND-ONLY list),
@@ -45,6 +49,7 @@ src-tauri/src/
                 app_settings KV (v11, e.g. active embed model);
                 get/set_setting, all_chunk_embeddings, docs_needing_embedding,
                 replace_chunks, clear_index_for_reembed
+                (implementation lives in crates/plume-core; this crate re-exports it)
   commands.rs   thin #[tauri::command] wrappers; Db(Mutex<Connection>) state.
                 Also embed-model cmds (status/download/remove/list/get/set) and
                 import_documents (extract → create doc → nudge embed worker)
@@ -183,6 +188,6 @@ src/
   tests, keep them green.
 - `pnpm check` — svelte-check must stay at 0 errors/0 warnings.
 - `pnpm tauri dev` for live verification; SQLite lives at
-  `~/Library/Application Support/com.adamwickwire.markdown/markdown.db`
+  `~/Library/Application Support/com.plumemd.app/markdown.db`
   (inspect with sqlite3 to verify persistence).
 - rustc ≥ 1.95 required (libsqlite3-sys uses `cfg_select!`).

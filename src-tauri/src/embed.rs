@@ -147,33 +147,7 @@ fn collect_text<'a>(node: &'a AstNode<'a>, out: &mut String) {
     }
 }
 
-/// Serialize an embedding to its little-endian f32 BLOB (`EMBED_BYTES` long).
-pub fn embedding_to_blob(v: &[f32]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(v.len() * 4);
-    for f in v {
-        bytes.extend_from_slice(&f.to_le_bytes());
-    }
-    bytes
-}
-
-/// Deserialize a `chunks.embedding` BLOB back to f32s. The dimension is no
-/// longer fixed (the active model may be 384/768/1024-dim), so we require only a
-/// non-empty, 4-byte-aligned blob — a length that isn't a whole number of f32s
-/// means a corrupt row. Cross-model comparison is prevented upstream: switching
-/// models wipes the index, and `run_semantic_search` skips any chunk whose dim
-/// doesn't match the query.
-pub fn blob_to_embedding(blob: &[u8]) -> Result<Vec<f32>> {
-    if blob.is_empty() || blob.len() % 4 != 0 {
-        return Err(Error::InvalidInput(format!(
-            "embedding blob is {} bytes, not a whole number of f32s",
-            blob.len()
-        )));
-    }
-    Ok(blob
-        .chunks_exact(4)
-        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect())
-}
+pub use plume_core::embed_blob::{blob_to_embedding, embedding_to_blob};
 
 /// L2-normalize in place. Normalizing on write (plan D5) lets query-time cosine
 /// be a plain dot product. A zero vector is left as-is.

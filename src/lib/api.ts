@@ -284,4 +284,6 @@ export const api = {
       voice,
     }),
   stopAssistant: () => invoke<void>("stop_assistant"),
+  mcpStatus: () =>
+    invoke<{ binaryPath: string; installed: boolean; buildCommand: string }>("mcp_status"),
 };

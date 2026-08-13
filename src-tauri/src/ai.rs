@@ -15,7 +15,8 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_TOKENS: u32 = 64_000;
 
-const KEYRING_SERVICE: &str = "com.adamwickwire.markdown";
+const KEYRING_SERVICE: &str = "com.plumemd.app";
+const LEGACY_KEYRING_SERVICE: &str = "com.adamwickwire.markdown";
 const DEV_KEYS_FILE: &str = "dev-keys.json";
 
 // Event names shared with the frontend assistant store. Every payload carries
@@ -216,6 +217,11 @@ fn keyring_entry(name: &str) -> Result<keyring::Entry> {
         .map_err(|e| Error::InvalidInput(format!("keychain unavailable: {e}")))
 }
 
+fn legacy_keyring_entry(name: &str) -> Result<keyring::Entry> {
+    keyring::Entry::new(LEGACY_KEYRING_SERVICE, name)
+        .map_err(|e| Error::InvalidInput(format!("keychain unavailable: {e}")))
+}
+
 /// Store a secret under `name` (release: keychain; debug: dev-keys file). Shared
 /// by the provider keys and the Tavily key so both honor the same invariant.
 fn store_key(app: &AppHandle, name: &str, key: &str) -> Result<()> {
@@ -240,7 +246,14 @@ fn read_key(app: &AppHandle, name: &str) -> Result<Option<String>> {
     } else {
         match keyring_entry(name)?.get_password() {
             Ok(key) => Ok(Some(key)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring::Error::NoEntry) => match legacy_keyring_entry(name)?.get_password() {
+                Ok(key) => {
+                    let _ = keyring_entry(name)?.set_password(&key);
+                    Ok(Some(key))
+                }
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(e) => Err(Error::InvalidInput(format!("failed to read API key: {e}"))),
+            },
             Err(e) => Err(Error::InvalidInput(format!("failed to read API key: {e}"))),
         }
     }

@@ -81,6 +81,51 @@ A knowledge workspace for notes, sources, and drafts.
 | Import | pdf-extract (PDF) · zip + quick-xml (DOCX) |
 | Documents | docx-rs for Word export |
 
+## Connect a coding agent
+
+Plume can expose your notebook to Claude Code, Cursor, Grok, or VS Code over
+MCP (stdio). The agent reads and writes the same project plans you see in the
+app — Plume does not need to be open.
+
+```sh
+cargo build -p plume-mcp --release
+```
+
+Then point your agent at the binary (`src-tauri/target/release/plume-mcp`), or
+copy a ready-made snippet from **Settings → Agents**.
+
+```json
+{
+  "mcpServers": {
+    "plume": {
+      "command": "/absolute/path/to/plume-mcp"
+    }
+  }
+}
+```
+
+Grok:
+
+```sh
+grok mcp add plume -- /absolute/path/to/plume-mcp
+```
+
+Codex (CLI, ChatGPT desktop, and the IDE extension share `~/.codex/config.toml`):
+
+```sh
+codex mcp add plume -- /absolute/path/to/plume-mcp
+```
+
+```toml
+[mcp_servers.plume]
+command = "/absolute/path/to/plume-mcp"
+```
+
+Optional: `--db PATH` or `PLUME_DB` to use a database other than the default
+app-data file. Tools: `list_projects`, `list_documents`, `get_document`,
+`search_notes`, `create_project`, `create_document` (defaults to a plan),
+`update_document`, `append_to_document`, `capture_idea`.
+
 ## Development
 
 Prereqs: Rust ≥ 1.95, Node 22+, pnpm.
@@ -104,7 +149,7 @@ Notes for development builds:
   of the Keychain (rebuilds change the binary signature, which would otherwise
   trigger endless password prompts). Release builds use the Keychain.
 - The database lives at
-  `~/Library/Application Support/com.adamwickwire.markdown/markdown.db`.
+  `~/Library/Application Support/com.plumemd.app/markdown.db`.
 - The local-search model downloads to that same app data folder, only when you
   choose to download it in Settings.
 

@@ -629,3 +629,45 @@ pub fn send_content_multiply(
 pub fn stop_assistant(app: AppHandle, state: State<AiState>) {
     ai::stop_stream(&app, &state)
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpStatus {
+    pub binary_path: String,
+    pub installed: bool,
+    pub build_command: String,
+}
+
+/// Locate the stdio MCP binary: next to this app if bundled, else the
+/// workspace target/debug or target/release copy.
+#[tauri::command]
+pub fn mcp_status() -> McpStatus {
+    let path = resolve_mcp_binary();
+    McpStatus {
+        installed: path.is_file(),
+        binary_path: path.display().to_string(),
+        build_command: "cargo build -p plume-mcp --release".into(),
+    }
+}
+
+fn resolve_mcp_binary() -> std::path::PathBuf {
+    let name = if cfg!(windows) {
+        "plume-mcp.exe"
+    } else {
+        "plume-mcp"
+    };
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sibling = dir.join(name);
+            if sibling.is_file() {
+                return sibling;
+            }
+        }
+    }
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let release = manifest.join("target/release").join(name);
+    if release.is_file() {
+        return release;
+    }
+    manifest.join("target/debug").join(name)
+}

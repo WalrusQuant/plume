@@ -29,7 +29,11 @@
   let hasSavedKey = $state(false);
   let tavilyKeyInput = $state("");
   let hasSavedTavilyKey = $state(false);
-  let activeTab = $state<"ai" | "local">("ai");
+  let activeTab = $state<"ai" | "local" | "agents">("ai");
+  let mcpStatus = $state<{ binaryPath: string; installed: boolean; buildCommand: string } | null>(
+    null,
+  );
+  let mcpCopied = $state("");
   let modelStatus = $state<ModelStatus | null>(null);
   let models = $state<EmbedModelInfo[]>([]);
   let modelBusy = $state<"" | "downloading" | "removing" | "switching">("");
@@ -55,8 +59,13 @@
       keyError = "";
       tavilyKeyError = "";
       modelBusy = "";
+      mcpCopied = "";
       void api.hasTavilyKey().then((has) => (hasSavedTavilyKey = has));
       void refreshModels();
+      void api
+        .mcpStatus()
+        .then((s) => (mcpStatus = s))
+        .catch((err) => toast.error(String(err)));
     }
   });
 
@@ -84,6 +93,39 @@
       if (provider === formProvider) hasSavedKey = has;
     });
   });
+
+  type McpClient = "cursor" | "claude" | "grok" | "codex" | "vscode";
+
+  function mcpSnippet(kind: McpClient): string {
+    const cmd = mcpStatus?.binaryPath ?? "/path/to/plume-mcp";
+    if (kind === "vscode") {
+      return JSON.stringify(
+        { servers: { plume: { type: "stdio", command: cmd } } },
+        null,
+        2,
+      );
+    }
+    if (kind === "grok") {
+      return `grok mcp add plume -- ${cmd}`;
+    }
+    if (kind === "codex") {
+      return `codex mcp add plume -- ${cmd}`;
+    }
+    return JSON.stringify(
+      { mcpServers: { plume: { command: cmd } } },
+      null,
+      2,
+    );
+  }
+
+  async function copyMcp(kind: McpClient) {
+    try {
+      await navigator.clipboard.writeText(mcpSnippet(kind));
+      mcpCopied = kind;
+    } catch (err) {
+      toast.error(String(err));
+    }
+  }
 
   function onProviderChange(provider: AIProvider) {
     formProvider = provider;
@@ -231,6 +273,15 @@
       >
         Local search
       </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "agents"}
+        class="settings-tab {activeTab === 'agents' ? 'settings-tab--active' : ''}"
+        onclick={() => (activeTab = "agents")}
+      >
+        Agents
+      </button>
     </div>
 
     {#if activeTab === "ai"}
@@ -336,7 +387,7 @@
           <p class="assistant-key-error">{tavilyKeyError}</p>
         {/if}
       </form>
-    {:else}
+    {:else if activeTab === "local"}
       <div class="local-search-tab">
         <label class="dialog-label" for="embed-model-select">Search model</label>
         <select
@@ -392,6 +443,48 @@
           new edits pause until a model is installed again).
         </p>
       </div>
+    {:else}
+      <div class="agents-tab">
+        <p class="assistant-key-note">
+          Connect a coding agent to this notebook. It can read and update project
+          plans even when Plume is closed. No token — the agent launches the
+          local <code>plume-mcp</code> binary over stdio.
+        </p>
+        {#if mcpStatus}
+          <p class="assistant-key-status">
+            {mcpStatus.installed ? "✓ Agent server is built." : "Agent server not built yet."}
+          </p>
+          <p class="assistant-key-note model-path">{mcpStatus.binaryPath}</p>
+          {#if !mcpStatus.installed}
+            <p class="assistant-key-note">
+              Build it once from the repo:
+              <code>{mcpStatus.buildCommand}</code>
+            </p>
+          {/if}
+        {/if}
+        <p class="dialog-label">Copy a config</p>
+        <div class="mcp-copy-row">
+          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("cursor")}>
+            {mcpCopied === "cursor" ? "Copied" : "Cursor"}
+          </button>
+          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("claude")}>
+            {mcpCopied === "claude" ? "Copied" : "Claude Code"}
+          </button>
+          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("grok")}>
+            {mcpCopied === "grok" ? "Copied" : "Grok"}
+          </button>
+          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("codex")}>
+            {mcpCopied === "codex" ? "Copied" : "Codex"}
+          </button>
+          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("vscode")}>
+            {mcpCopied === "vscode" ? "Copied" : "VS Code"}
+          </button>
+        </div>
+        <p class="assistant-key-note">
+          Cursor / Claude Code: paste into MCP settings. Grok and Codex: run the
+          copied command. VS Code: paste into <code>.vscode/mcp.json</code>.
+        </p>
+      </div>
     {/if}
   </div>
 
@@ -422,6 +515,13 @@
     opacity: 0.6;
     cursor: default;
     text-decoration: none;
+  }
+
+  .mcp-copy-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0 12px;
   }
 
   .model-download-btn {

@@ -1,12 +1,13 @@
 mod ai;
 mod commands;
 mod embed;
-mod error;
 mod export;
 mod import;
 mod preview;
-mod storage;
 mod websearch;
+
+pub use plume_core::error;
+pub use plume_core::storage;
 
 use std::sync::Mutex;
 
@@ -22,6 +23,9 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            // Identifier changed to com.plumemd.app; copy the old notebook
+            // once if this is the first launch under the new id.
+            let _ = plume_core::migrate_legacy_data_dir(&data_dir);
             let db_path = data_dir.join("markdown.db");
             // Safety net: snapshot the DB before migrations can touch it. If a
             // future migration half-applies, the user can roll back by hand.
@@ -110,6 +114,7 @@ pub fn run() {
             commands::send_idea_expand,
             commands::send_content_multiply,
             commands::stop_assistant,
+            commands::mcp_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
