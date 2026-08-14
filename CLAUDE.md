@@ -53,8 +53,9 @@ src-tauri/src/
                 replace_chunks, clear_index_for_reembed
                 (implementation lives in crates/plume-core; this crate re-exports it)
   commands.rs   thin #[tauri::command] wrappers; Db(Mutex<Connection>) state.
-                Also embed-model cmds (status/download/remove/list/get/set) and
-                import_documents (extract → create doc → nudge embed worker)
+                Also embed-model cmds (status/download/remove/list/get/set),
+                import_documents (extract → create doc → nudge embed worker),
+                custom-endpoint key cmds, and test_connector (non-streaming ping)
   preview.rs    comrak options + render_html (frontmatter stripped, raw HTML
                 escaped — preview pane has IPC access, keep it escaped)
   ai.rs         providers (Anthropic Messages API; OpenAI / Grok / OpenRouter /
@@ -99,8 +100,10 @@ src-tauri/src/
 
 src/
   lib/api.ts            typed invoke() wrappers — keep 1:1 with commands
+                        (ConnectorSpec on every stream cmd; custom key slots)
+  lib/aiSettings.ts     provider union, named custom endpoints, settings merge
   lib/assistant.svelte.ts  chat rune store (multi-thread per doc, token usage,
-                        persisted settings incl. Voice & tone)
+                        persisted settings incl. Voice & tone + custom connectors)
   lib/inlineEdit.svelte.ts  selection-menu AI edit: streamed preview, accept/
                         reject against the CodeMirror selection
   lib/ideaExpand.svelte.ts  idea-inbox expansion stream controller
@@ -122,12 +125,20 @@ src/
                         quick-capture; MultiplyModal = target picker;
                         ImportModal = documents-vs-sources picker on import;
                         SourceViewerModal = read-only source view (+ remove /
-                        convert-to-doc); SettingsDialog is tabbed (AI | Local
-                        search — the embed-model download/remove + picker).
-                        HomeShelf = the project-shelf home when no doc is open
-                        (the shelf IS the nav — sidebar hides).
+                        convert-to-doc); SettingsDialog is tabbed (AI |
+                        Local search | Agents) — AI holds built-in connectors
+                        (Anthropic / OpenAI / Grok / OpenRouter), named custom
+                        endpoints, a connection test, Voice & tone, and keys;
+                        Local search is the embed-model download/remove + picker.
+                        CheatsheetPanel (Guide tab) inserts markdown at the
+                        cursor. Sidebar reorder is pointer-drag (HTML5 drag
+                        would be stolen by Tauri file-drop); docs can drop onto
+                        a folder header to move. HomeShelf = the project-shelf
+                        home when no doc is open (the shelf IS the nav —
+                        sidebar hides).
   routes/+page.svelte   app shell: doc state, debounced save (500ms) +
-                        preview (150ms), export, settings, right-pane tab
+                        preview (150ms), export, settings (⌘,), right-pane
+                        tab + resizable assistant/preview pane (max 50%)
 ```
 
 ## Conventions & invariants
@@ -173,9 +184,12 @@ src/
 - **AI keys never touch the webview.** Release builds use the OS keychain;
   debug builds use `dev-keys.json` in app data dir (keychain re-prompts on
   every dev rebuild — do not "fix" this back to keychain).
-- AI provider/model defaults live in `ai.rs::Provider::default_model()`.
-  Verify current model IDs against the claude-api skill / OpenRouter catalog
-  before changing — do not guess from memory.
+- AI provider/model defaults live in `ai.rs::Provider::default_model()` and
+  `src/lib/aiSettings.ts`. Verify current model IDs against the claude-api
+  skill, the OpenAI catalog, xAI docs, and the OpenRouter catalog before
+  changing — do not guess from memory. Named custom endpoints store name +
+  base URL + model in localStorage; keys stay in the keychain /
+  `dev-keys.json` under `custom-api-key:{id}`.
 - Editor content flows one way: CodeMirror owns the text after mount
   (`content` prop is initial-only; remount via `{#key doc.id}` to switch
   docs). Programmatic edits go through `editorView.dispatch` so the

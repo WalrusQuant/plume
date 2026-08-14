@@ -109,7 +109,7 @@ function greet(name) {
 ## The tabs worth knowing
 
 - **Preview** — your formatted writing, live as you type.
-- **Guide** — a one-screen markdown cheatsheet, handy while you learn.
+- **Guide** — markdown syntax with a short how-to; click a row to insert it at the cursor.
 - **Assistant** — draft, rewrite, or brainstorm with the AI, and search your notes.
 - **History** — snapshots of your document you can restore any time.
 

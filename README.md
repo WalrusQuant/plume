@@ -23,7 +23,9 @@ A knowledge workspace for notes, sources, drafts, and project plans.
   **multiple conversations per document** with token usage shown; threads
   persist across restarts; insert suggestions at the cursor or replace the whole
   document with one click. Works with **Anthropic**, **OpenAI**, **Grok**,
-  **OpenRouter**, or a named custom OpenAI-compatible endpoint
+  **OpenRouter**, or a named custom OpenAI-compatible endpoint. Settings can
+  test a connection before you chat. The assistant header shows the active
+  connector and model.
 - **Search your notes** — the assistant can **semantically search across
   everything you've written** and answer grounded in your own documents, naming
   its sources. The embedding model runs **entirely on your machine** — your
@@ -69,10 +71,14 @@ A knowledge workspace for notes, sources, drafts, and project plans.
     tables with column alignment + header shading
   - **Markdown / plain text** — raw source or stripped text
 - **Local-first & private** — everything lives in a SQLite database on your
-  machine. API keys are stored in the macOS Keychain and never touch the UI
-  layer. The only data that leaves your machine is what you send to your chosen
-  AI provider (or the web-search service, if you turn it on)
-- Light/dark themes, folders, focus mode, full-document autosave
+  machine. API keys are stored in the macOS Keychain (or `dev-keys.json` in
+  debug builds), not in the webview. The only data that leaves your machine is
+  what you send to your chosen AI provider (or the web-search service, if you
+  turn it on)
+- Light/dark themes (dimmed light canvas), folders you can drag to reorder,
+  documents and sources you can reorder, drop a doc onto a folder to file it,
+  a resizable assistant/preview pane (capped at half width), a Guide tab that
+  inserts markdown at the cursor, **⌘,** for Settings, and full-document autosave
 
 ## Stack
 
@@ -146,6 +152,7 @@ Verification:
 
 ```sh
 pnpm check                                        # svelte-check
+pnpm test                                         # Vitest
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust unit tests
 pnpm tauri build                                  # production bundle
 ```
@@ -177,9 +184,13 @@ v3: a **local semantic notebook** — on-device embeddings, "search your
 notes," a curated opt-in model picker, and **document import** (Markdown / text /
 PDF / Word) as editable docs or searchable Sources.
 
-v4 (current): **coding agents over MCP** — a stdio `plume-mcp` server so an
-external agent can plan in the same notebook, plus the bundle id
-`com.plumemd.app`.
+v4: **coding agents over MCP** — a stdio `plume-mcp` server so an external
+agent can plan in the same notebook, plus the bundle id `com.plumemd.app`.
+
+v5 (current): **connectors** — OpenAI, Grok, and named custom endpoints beside
+Anthropic and OpenRouter; connection test; per-provider history budgets.
+Workspace chrome: resizable right pane, pointer reorder (including Sources),
+drop a document onto a folder, and a click-to-insert Guide.
 
 Direction: Plume is a local-first **AI notebook and knowledge workspace** —
 capture notes and sources, let the AI search everything you've gathered, draft

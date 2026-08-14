@@ -4,7 +4,7 @@
 
 Plume is a local-first Tauri 2 desktop application. The SvelteKit/Svelte 5 frontend lives in `src/`: routes are in `src/routes`, reusable UI in `src/lib/components`, pure TypeScript helpers in `src/lib`, and global theme variables in `src/app.css`. Static files belong in `static/`; documentation assets belong in `docs/`.
 
-The Rust backend is under `src-tauri/src`. Tauri command wrappers live in `commands.rs`, SQLite persistence and append-only migrations in `storage.rs`, AI integrations in `ai.rs`, and target-specific renderers in `export/`. Keep frontend `invoke()` wrappers in `src/lib/api.ts` aligned with Rust commands.
+The Rust backend is under `src-tauri/src`. Tauri command wrappers live in `commands.rs`, SQLite persistence and append-only migrations in `storage.rs`, AI integrations in `ai.rs`, and target-specific renderers in `export/`. Keep frontend `invoke()` wrappers in `src/lib/api.ts` aligned with Rust commands (`ConnectorSpec` on stream commands; custom key + `test_connector` cmds). Connector settings (built-ins + named custom endpoints) live in `src/lib/aiSettings.ts`.
 
 ## Build, Test, and Development Commands
 
