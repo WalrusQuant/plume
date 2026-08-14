@@ -20,7 +20,7 @@ source of truth for contributors.
 - **Frontend:** SvelteKit + adapter-static (SSR off), Svelte 5 runes,
   TypeScript, CodeMirror 6
 - **Backend:** rusqlite (bundled, WAL), comrak (default-features off),
-  reqwest (rustls), uuid v4, chrono, anyhow, thiserror 2, keyring, docx-rs,
+  reqwest (rustls), uuid v4, chrono, anyhow, thiserror 2, docx-rs,
   image + base64 (docx image embedding); **fastembed** (on-device embeddings,
   `ort` static-linked, ort-download-binaries) for the semantic notebook;
   **pdf-extract** (PDF import), **quick-xml** + **zip** (DOCX import — `zip` is
@@ -181,15 +181,17 @@ src/
   `preview::options()`** — every target parses the same comrak AST, so a
   docx/x/linkedin fix that changes parse options would alter the live preview
   too. Add a `NodeValue` arm in the renderer instead.
-- **AI keys never touch the webview.** Release builds use the OS keychain;
-  debug builds use `dev-keys.json` in app data dir (keychain re-prompts on
-  every dev rebuild — do not "fix" this back to keychain).
+- **AI keys never touch the webview.** They live in `api-keys.json` (mode
+  0600) in the app data dir, next to the database — not the OS keychain.
+  Local rebuilds change the binary signature and made Keychain re-prompt
+  for every connector. An older `dev-keys.json` is imported once if the
+  new file is missing.
 - AI provider/model defaults live in `ai.rs::Provider::default_model()` and
   `src/lib/aiSettings.ts`. Verify current model IDs against the claude-api
   skill, the OpenAI catalog, xAI docs, and the OpenRouter catalog before
   changing — do not guess from memory. Named custom endpoints store name +
-  base URL + model in localStorage; keys stay in the keychain /
-  `dev-keys.json` under `custom-api-key:{id}`.
+  base URL + model in localStorage; keys stay in `api-keys.json` under
+  `custom-api-key:{id}`.
 - Editor content flows one way: CodeMirror owns the text after mount
   (`content` prop is initial-only; remount via `{#key doc.id}` to switch
   docs). Programmatic edits go through `editorView.dispatch` so the

@@ -207,8 +207,8 @@ export const api = {
   testConnector: (connector: ConnectorSpec, model: string | null, key: string | null) =>
     invoke<string>("test_connector", { connector, model, key }),
 
-  /** Tavily web-search key — BYOK, stored like the provider keys (keychain in
-      release, dev-keys file in debug). Not tied to a provider. */
+  /** Tavily web-search key — BYOK, stored like the provider keys in
+      `api-keys.json`. Not tied to a provider. */
   setTavilyKey: (key: string) => invoke<void>("set_tavily_key", { key }),
   hasTavilyKey: () => invoke<boolean>("has_tavily_key"),
   deleteTavilyKey: () => invoke<void>("delete_tavily_key"),

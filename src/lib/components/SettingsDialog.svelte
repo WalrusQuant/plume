@@ -547,10 +547,9 @@
             <p class="settings-help">
               {#if formProvider === "custom"}
                 Optional for local servers that do not require a key.
-              {:else if import.meta.env.DEV}
-                Dev build: keys are stored in a local file in the app data folder (keychain is skipped to avoid password prompts).
               {:else}
-                Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider.
+                Keys are stored in a locked file on this machine. They never
+                leave except to call your AI provider.
               {/if}
             </p>
             <div class="settings-test-row">

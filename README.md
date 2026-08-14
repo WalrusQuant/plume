@@ -71,10 +71,9 @@ A knowledge workspace for notes, sources, drafts, and project plans.
     tables with column alignment + header shading
   - **Markdown / plain text** — raw source or stripped text
 - **Local-first & private** — everything lives in a SQLite database on your
-  machine. API keys are stored in the macOS Keychain (or `dev-keys.json` in
-  debug builds), not in the webview. The only data that leaves your machine is
-  what you send to your chosen AI provider (or the web-search service, if you
-  turn it on)
+  machine. API keys are stored in a locked file in the app data folder, not
+  in the webview. The only data that leaves your machine is what you send to
+  your chosen AI provider (or the web-search service, if you turn it on)
 - Light/dark themes (dimmed light canvas), folders you can drag to reorder,
   documents and sources you can reorder, drop a doc onto a folder to file it,
   a resizable assistant/preview pane (capped at half width), a Guide tab that
@@ -159,9 +158,10 @@ pnpm tauri build                                  # production bundle
 
 Notes for development builds:
 
-- AI keys are stored in a plain `dev-keys.json` in the app data folder instead
-  of the Keychain (rebuilds change the binary signature, which would otherwise
-  trigger endless password prompts). Release builds use the Keychain.
+- AI keys are stored in `api-keys.json` (mode 0600) in the app data folder.
+  An older `dev-keys.json` is imported once if present. The Keychain is not
+  used — local rebuilds change the binary signature and would re-prompt
+  otherwise.
 - The database lives at
   `~/Library/Application Support/com.plumemd.app/markdown.db`.
 - The local-search model downloads to that same app data folder, only when you

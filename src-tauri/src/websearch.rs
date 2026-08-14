@@ -4,8 +4,8 @@
 //! that text back to the model as a tool result so it can ground (and cite) its
 //! reply.
 //!
-//! BYOK: the Tavily key is stored alongside the AI provider keys (keychain in
-//! release, `dev-keys.json` in debug) — see `ai.rs`.
+//! BYOK: the Tavily key is stored alongside the AI provider keys in
+//! `api-keys.json` — see `ai.rs`.
 
 use serde::Deserialize;
 use serde_json::json;

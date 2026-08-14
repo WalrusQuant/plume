@@ -17,8 +17,6 @@ const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
 const GROK_URL: &str = "https://api.x.ai/v1/chat/completions";
 const MAX_TOKENS: u32 = 64_000;
 
-const KEYRING_SERVICE: &str = "com.plumemd.app";
-const LEGACY_KEYRING_SERVICE: &str = "com.adamwickwire.markdown";
 const DEV_KEYS_FILE: &str = "dev-keys.json";
 
 // Event names shared with the frontend assistant store. Every payload carries
@@ -238,101 +236,101 @@ pub struct AiState {
 // ---------------------------------------------------------------------------
 // Key storage
 //
-// Release builds use the OS keychain. Debug builds use a plain JSON file in
-// the app data dir: every dev rebuild changes the binary signature, and the
-// keychain would re-prompt for the login password each time.
+// All secrets live in one JSON map on disk (`api-keys.json` in the app data
+// dir, mode 0600). Same folder as the database. The OS keychain prompts once
+// per item AND again whenever the binary signature changes — every local
+// rebuild looked like a new app, so saving four connectors meant four
+// password dialogs. A user-owned file does not.
+//
+// `dev-keys.json` from older debug builds is imported once if the new file
+// is missing.
 // ---------------------------------------------------------------------------
 
-fn dev_keys_path(app: &AppHandle) -> Result<std::path::PathBuf> {
+const TAVILY_KEY_NAME: &str = "tavily-api-key";
+const KEYS_FILE: &str = "api-keys.json";
+
+fn keys_file_path(app: &AppHandle) -> Result<std::path::PathBuf> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|e| Error::InvalidInput(format!("no app data dir: {e}")))?;
-    Ok(dir.join(DEV_KEYS_FILE))
+    Ok(dir.join(KEYS_FILE))
 }
 
-fn dev_keys_read(app: &AppHandle) -> Result<HashMap<String, String>> {
-    let path = dev_keys_path(app)?;
-    if !path.exists() {
-        return Ok(HashMap::new());
-    }
-    let raw = std::fs::read_to_string(&path)?;
-    serde_json::from_str(&raw).map_err(|e| {
+fn parse_keys_blob(raw: &str) -> Result<HashMap<String, String>> {
+    serde_json::from_str(raw).map_err(|e| {
         Error::InvalidInput(format!(
-            "stored API keys are unreadable ({e}) — delete {} and re-enter them",
-            path.display()
+            "stored API keys are unreadable ({e}) — delete them in Settings and re-enter"
         ))
     })
 }
 
-fn dev_keys_write(app: &AppHandle, keys: &HashMap<String, String>) -> Result<()> {
-    std::fs::write(dev_keys_path(app)?, serde_json::to_string_pretty(keys).unwrap())?;
+fn keys_blob_json(keys: &HashMap<String, String>) -> String {
+    serde_json::to_string_pretty(keys).expect("string map serializes")
+}
+
+fn read_keys_file(path: &std::path::Path) -> Result<HashMap<String, String>> {
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    parse_keys_blob(&std::fs::read_to_string(path)?)
+}
+
+fn write_keys_file(path: &std::path::Path, keys: &HashMap<String, String>) -> Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, keys_blob_json(keys))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(0o600);
+        std::fs::set_permissions(path, perms)?;
+    }
     Ok(())
 }
 
-/// Keychain/dev-keys name for the Tavily web-search key. Stored the same way as
-/// the provider keys but not tied to the `Provider` enum (it isn't an AI
-/// provider — it's a tool the assistant can call).
-const TAVILY_KEY_NAME: &str = "tavily-api-key";
-
-fn keyring_entry(name: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(KEYRING_SERVICE, name)
-        .map_err(|e| Error::InvalidInput(format!("keychain unavailable: {e}")))
+fn keys_read(app: &AppHandle) -> Result<HashMap<String, String>> {
+    let path = keys_file_path(app)?;
+    if path.exists() {
+        return read_keys_file(&path);
+    }
+    // One-time import of the old debug-build file.
+    let leftover = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| Error::InvalidInput(format!("no app data dir: {e}")))?
+        .join(DEV_KEYS_FILE);
+    let keys = read_keys_file(&leftover)?;
+    if !keys.is_empty() {
+        write_keys_file(&path, &keys)?;
+    }
+    Ok(keys)
 }
 
-fn legacy_keyring_entry(name: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(LEGACY_KEYRING_SERVICE, name)
-        .map_err(|e| Error::InvalidInput(format!("keychain unavailable: {e}")))
+fn keys_write(app: &AppHandle, keys: &HashMap<String, String>) -> Result<()> {
+    write_keys_file(&keys_file_path(app)?, keys)
 }
 
-/// Store a secret under `name` (release: keychain; debug: dev-keys file). Shared
-/// by the provider keys and the Tavily key so both honor the same invariant.
 fn store_key(app: &AppHandle, name: &str, key: &str) -> Result<()> {
     let key = key.trim();
     if key.is_empty() {
         return Err(Error::InvalidInput("API key must not be empty".into()));
     }
-    if cfg!(debug_assertions) {
-        let mut keys = dev_keys_read(app)?;
-        keys.insert(name.to_string(), key.to_string());
-        dev_keys_write(app, &keys)
-    } else {
-        keyring_entry(name)?
-            .set_password(key)
-            .map_err(|e| Error::InvalidInput(format!("failed to store API key: {e}")))
-    }
+    let mut keys = keys_read(app)?;
+    keys.insert(name.to_string(), key.to_string());
+    keys_write(app, &keys)
 }
 
 fn read_key(app: &AppHandle, name: &str) -> Result<Option<String>> {
-    if cfg!(debug_assertions) {
-        Ok(dev_keys_read(app)?.get(name).cloned())
-    } else {
-        match keyring_entry(name)?.get_password() {
-            Ok(key) => Ok(Some(key)),
-            Err(keyring::Error::NoEntry) => match legacy_keyring_entry(name)?.get_password() {
-                Ok(key) => {
-                    let _ = keyring_entry(name)?.set_password(&key);
-                    Ok(Some(key))
-                }
-                Err(keyring::Error::NoEntry) => Ok(None),
-                Err(e) => Err(Error::InvalidInput(format!("failed to read API key: {e}"))),
-            },
-            Err(e) => Err(Error::InvalidInput(format!("failed to read API key: {e}"))),
-        }
-    }
+    Ok(keys_read(app)?.get(name).cloned())
 }
 
 fn remove_key(app: &AppHandle, name: &str) -> Result<()> {
-    if cfg!(debug_assertions) {
-        let mut keys = dev_keys_read(app)?;
-        keys.remove(name);
-        dev_keys_write(app, &keys)
-    } else {
-        match keyring_entry(name)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(Error::InvalidInput(format!("failed to delete API key: {e}"))),
-        }
-    }
+    let mut keys = keys_read(app)?;
+    keys.remove(name);
+    keys_write(app, &keys)
 }
 
 pub fn set_api_key(app: &AppHandle, provider: Provider, key: &str) -> Result<()> {
@@ -1877,6 +1875,37 @@ mod tests {
         assert_eq!(Provider::Grok.key_name(), Some("xai-api-key"));
         assert_eq!(Provider::Openrouter.key_name(), Some("openrouter-api-key"));
         assert_eq!(Provider::Custom.key_name(), None);
+    }
+
+    #[test]
+    fn keys_blob_roundtrips() {
+        let mut keys = HashMap::new();
+        keys.insert("anthropic-api-key".into(), "sk-ant-1".into());
+        keys.insert("xai-api-key".into(), "xai-2".into());
+        let raw = keys_blob_json(&keys);
+        let back = parse_keys_blob(&raw).unwrap();
+        assert_eq!(back.get("anthropic-api-key").unwrap(), "sk-ant-1");
+        assert_eq!(back.get("xai-api-key").unwrap(), "xai-2");
+        assert!(parse_keys_blob("not-json").is_err());
+    }
+
+    #[test]
+    fn keys_file_roundtrips_on_disk() {
+        let dir = std::env::temp_dir().join(format!("plume-keys-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("api-keys.json");
+        let mut keys = HashMap::new();
+        keys.insert("openai-api-key".into(), "sk-test".into());
+        write_keys_file(&path, &keys).unwrap();
+        let back = read_keys_file(&path).unwrap();
+        assert_eq!(back.get("openai-api-key").unwrap(), "sk-test");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
