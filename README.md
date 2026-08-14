@@ -22,8 +22,8 @@ A knowledge workspace for notes, sources, drafts, and project plans.
 - **AI partner** — streaming chat with your document as context;
   **multiple conversations per document** with token usage shown; threads
   persist across restarts; insert suggestions at the cursor or replace the whole
-  document with one click. Works with **Anthropic** or **OpenRouter** (any model
-  they serve)
+  document with one click. Works with **Anthropic**, **OpenAI**, **Grok**,
+  **OpenRouter**, or a named custom OpenAI-compatible endpoint
 - **Search your notes** — the assistant can **semantically search across
   everything you've written** and answer grounded in your own documents, naming
   its sources. The embedding model runs **entirely on your machine** — your
@@ -82,7 +82,7 @@ A knowledge workspace for notes, sources, drafts, and project plans.
 | Frontend | SvelteKit (static) · Svelte 5 · TypeScript · CodeMirror 6 |
 | Markdown engine | comrak (one parse feeds preview, AI context, and exports) |
 | Storage | SQLite via rusqlite (WAL) |
-| AI | Anthropic Messages API / OpenRouter, streamed via SSE from Rust |
+| AI | Anthropic, OpenAI, Grok, OpenRouter, or custom endpoints — streamed via SSE from Rust |
 | Local search | fastembed (bge-small etc.) — on-device embeddings, brute-force cosine |
 | Import | pdf-extract (PDF) · zip + quick-xml (DOCX) |
 | Documents | docx-rs for Word export |

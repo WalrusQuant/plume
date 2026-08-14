@@ -3,6 +3,7 @@
   import { assistant, DEFAULT_MODELS } from "$lib/assistant.svelte";
   import { isBuiltinProvider, type BuiltinProvider } from "$lib/aiSettings";
   import { toast } from "$lib/toast.svelte";
+  import { formatError } from "$lib/formatError";
   import Dialog from "$lib/components/Dialog.svelte";
 
   interface Props {
@@ -50,6 +51,8 @@
   let modelStatus = $state<ModelStatus | null>(null);
   let models = $state<EmbedModelInfo[]>([]);
   let modelBusy = $state<"" | "downloading" | "removing" | "switching">("");
+  let testStatus = $state<"" | "checking" | "ok" | "err">("");
+  let testMessage = $state("");
 
   // The catalog entry for the currently-active model (for its size label + note).
   const activeModel = $derived(
@@ -82,6 +85,8 @@
       tavilyKeyError = "";
       modelBusy = "";
       mcpCopied = "";
+      testStatus = "";
+      testMessage = "";
       void api.hasTavilyKey().then((has) => (hasSavedTavilyKey = has));
       void refreshModels();
       void api
@@ -190,6 +195,8 @@
     formModel = DEFAULT_MODELS[provider];
     keyInput = "";
     keyError = "";
+    testStatus = "";
+    testMessage = "";
   }
 
   function onSelectCustom(id: string) {
@@ -199,6 +206,8 @@
     formModel = formConnectors.find((c) => c.id === id)?.model ?? "";
     keyInput = "";
     keyError = "";
+    testStatus = "";
+    testMessage = "";
   }
 
   function addCustom() {
@@ -266,6 +275,30 @@
       onClose();
     } catch (err) {
       keyError = String(err);
+    }
+  }
+
+  async function testConnection() {
+    testStatus = "checking";
+    testMessage = "";
+    const connector =
+      formProvider === "custom"
+        ? {
+            provider: "custom" as const,
+            customId: formCustomId,
+            baseUrl: selectedCustom?.baseUrl ?? "",
+          }
+        : { provider: formProvider };
+    try {
+      testMessage = await api.testConnector(
+        connector,
+        formModel.trim() || fallbackModel(formProvider, formCustomId) || null,
+        keyInput.trim() || null,
+      );
+      testStatus = "ok";
+    } catch (err) {
+      testStatus = "err";
+      testMessage = formatError(err);
     }
   }
 
@@ -520,6 +553,21 @@
                 Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider.
               {/if}
             </p>
+            <div class="settings-test-row">
+              <button
+                type="button"
+                class="dialog-btn dialog-btn--secondary"
+                disabled={testStatus === "checking"}
+                onclick={() => void testConnection()}
+              >
+                {testStatus === "checking" ? "Testing…" : "Test connection"}
+              </button>
+              {#if testStatus === "ok"}
+                <p class="settings-status">{testMessage}</p>
+              {:else if testStatus === "err"}
+                <p class="settings-error">{testMessage}</p>
+              {/if}
+            </div>
           </div>
         </div>
 
@@ -701,6 +749,13 @@
 
   .settings-add-endpoint {
     border-style: dashed;
+  }
+
+  .settings-test-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
   }
 
   .settings-field {

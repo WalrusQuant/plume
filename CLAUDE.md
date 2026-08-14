@@ -57,18 +57,20 @@ src-tauri/src/
                 import_documents (extract → create doc → nudge embed worker)
   preview.rs    comrak options + render_html (frontmatter stripped, raw HTML
                 escaped — preview pane has IPC access, keep it escaped)
-  ai.rs         providers (Anthropic /v1/messages + OpenRouter
-                /chat/completions), reqwest SSE → events assistant:token/
-                content/usage/done/error, abortable task in AiState, key
-                storage. Four stream entry points (chat, inline edit, idea
+  ai.rs         providers (Anthropic Messages API; OpenAI / Grok / OpenRouter /
+                named custom endpoints over OpenAI-compatible chat completions),
+                reqwest SSE → events assistant:token/content/usage/done/error,
+                abortable task in AiState, key storage (custom keys namespaced
+                per endpoint). Four stream entry points (chat, inline edit, idea
                 expand, content multiply), each with its own system prompt;
                 voice_section() injects the global Voice & tone into all.
                 Anthropic server-side compaction (beta compact-2026-01-12) on
                 the chat path; system-prompt caching; token usage parsed from SSE.
-                Chat is an agentic tool loop (both providers) with two tools:
-                web_search (Tavily, via websearch.rs) and search_notes (semantic
-                RAG over the user's docs). run_semantic_search guards on model
-                installed + dim-matches the query; both default OFF per chat.
+                Chat is an agentic tool loop with two tools: web_search (Tavily,
+                via websearch.rs) and search_notes (semantic RAG over the user's
+                docs). run_semantic_search guards on model installed + dim-matches
+                the query; both default OFF per chat. Custom endpoints skip
+                OpenAI-only stream_options so local servers don't 400.
   embed.rs      semantic notebook: chunk_document (block-boundary chunking,
                 capped at CHUNK_MAX_WORDS so nothing overruns the ~512-token
                 model window), the Embedder trait + fastembed-backed

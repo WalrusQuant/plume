@@ -6,6 +6,10 @@ import {
   estimateTokens,
   DEFAULT_CHAT_TITLE,
   OPENROUTER_HISTORY_BUDGET,
+  OPENAI_HISTORY_BUDGET,
+  GROK_HISTORY_BUDGET,
+  ANTHROPIC_HISTORY_BUDGET,
+  historyBudgetFor,
 } from "$lib/chatHistory";
 import type { ChatMessage } from "$lib/api";
 
@@ -181,5 +185,17 @@ describe("capHistory", () => {
       ),
     );
     expect(capHistory(msgs, OPENROUTER_HISTORY_BUDGET)).toHaveLength(20);
+  });
+});
+
+describe("historyBudgetFor", () => {
+  it("gives Anthropic the high backstop and Grok/OpenAI more room than OpenRouter", () => {
+    expect(historyBudgetFor("anthropic")).toBe(ANTHROPIC_HISTORY_BUDGET);
+    expect(historyBudgetFor("openai")).toBe(OPENAI_HISTORY_BUDGET);
+    expect(historyBudgetFor("grok")).toBe(GROK_HISTORY_BUDGET);
+    expect(historyBudgetFor("openrouter")).toBe(OPENROUTER_HISTORY_BUDGET);
+    expect(historyBudgetFor("custom")).toBe(OPENROUTER_HISTORY_BUDGET);
+    expect(OPENAI_HISTORY_BUDGET).toBeGreaterThan(OPENROUTER_HISTORY_BUDGET);
+    expect(GROK_HISTORY_BUDGET).toBeGreaterThan(OPENROUTER_HISTORY_BUDGET);
   });
 });

@@ -249,6 +249,14 @@
         {/each}
       </select>
       <div class="assistant-header-actions">
+        <button
+          type="button"
+          class="assistant-connector"
+          onclick={onOpenSettings}
+          title="Change connector in Settings"
+        >
+          {assistant.connectorSummary()}
+        </button>
         {#if contextTokens > 0}
           <span
             class="assistant-context"

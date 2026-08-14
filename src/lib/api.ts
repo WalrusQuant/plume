@@ -204,6 +204,8 @@ export const api = {
     invoke<void>("set_custom_api_key", { id, key }),
   hasCustomApiKey: (id: string) => invoke<boolean>("has_custom_api_key", { id }),
   deleteCustomApiKey: (id: string) => invoke<void>("delete_custom_api_key", { id }),
+  testConnector: (connector: ConnectorSpec, model: string | null, key: string | null) =>
+    invoke<string>("test_connector", { connector, model, key }),
 
   /** Tavily web-search key — BYOK, stored like the provider keys (keychain in
       release, dev-keys file in debug). Not tied to a provider. */

@@ -460,6 +460,16 @@ pub fn delete_custom_api_key(app: AppHandle, id: String) -> Result<()> {
 }
 
 #[tauri::command]
+pub async fn test_connector(
+    app: AppHandle,
+    connector: ConnectorSpec,
+    model: Option<String>,
+    key: Option<String>,
+) -> Result<String> {
+    ai::test_connector(&app, connector, model, key).await
+}
+
+#[tauri::command]
 pub fn set_tavily_key(app: AppHandle, key: String) -> Result<()> {
     ai::set_tavily_key(&app, &key)
 }

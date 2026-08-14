@@ -1,10 +1,15 @@
 import type { ChatMessage } from "$lib/api";
+import type { AIProvider } from "./aiSettings";
 
 // Upper bound (estimated tokens) on the chat history we send. The full thread
 // always stays in storage and the UI — this only trims what goes over the wire.
-/** OpenRouter has no server-side compaction, so this is a real cap: a long
-    thread drops its oldest turns once it crosses the budget. */
+/** OpenRouter / unknown custom servers: no server-side compaction, so this
+    is a real cap. A long thread drops its oldest turns once it crosses. */
 export const OPENROUTER_HISTORY_BUDGET = 120_000;
+/** Grok 4.6 window is 500k; leave headroom for the system prompt + tools. */
+export const GROK_HISTORY_BUDGET = 400_000;
+/** GPT-5.6 windows are 1M+; same headroom idea as Grok. */
+export const OPENAI_HISTORY_BUDGET = 400_000;
 /** Anthropic uses server-side compaction (summarizes at ~150K input), so this
     is only a backstop set far above the trigger — it effectively never fires.
     Because compaction keeps the input near 150K, the newest turns (incl. the
@@ -12,6 +17,21 @@ export const OPENROUTER_HISTORY_BUDGET = 120_000;
     is a last-resort guard against a pathological >600K thread, not a context
     manager. */
 export const ANTHROPIC_HISTORY_BUDGET = 600_000;
+
+/** Wire-side history budget for the active connector. */
+export function historyBudgetFor(provider: AIProvider): number {
+  switch (provider) {
+    case "anthropic":
+      return ANTHROPIC_HISTORY_BUDGET;
+    case "openai":
+      return OPENAI_HISTORY_BUDGET;
+    case "grok":
+      return GROK_HISTORY_BUDGET;
+    case "openrouter":
+    case "custom":
+      return OPENROUTER_HISTORY_BUDGET;
+  }
+}
 
 /** Must match storage.rs::DEFAULT_CHAT_TITLE — signals an un-titled chat. */
 export const DEFAULT_CHAT_TITLE = "New chat";

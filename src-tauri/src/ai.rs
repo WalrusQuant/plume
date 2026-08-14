@@ -376,6 +376,105 @@ pub fn delete_custom_api_key(app: &AppHandle, id: &str) -> Result<()> {
     remove_key(app, &custom_key_name(id)?)
 }
 
+fn include_stream_usage(provider: Provider) -> bool {
+    provider != Provider::Custom
+}
+
+/// One-shot non-streaming ping so Settings can verify a connector before chat.
+pub async fn test_connector(
+    app: &AppHandle,
+    connector: ConnectorSpec,
+    model: Option<String>,
+    key_override: Option<String>,
+) -> Result<String> {
+    let provider = connector.provider;
+    let model = model
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| provider.default_model().to_string());
+    if model.is_empty() {
+        return Err(Error::InvalidInput("set a model first".into()));
+    }
+    let api_key = match key_override.map(|k| k.trim().to_string()).filter(|k| !k.is_empty()) {
+        Some(k) => k,
+        None if provider == Provider::Custom => {
+            let id = connector.custom_id.as_deref().unwrap_or("");
+            get_custom_api_key(app, id)?.unwrap_or_default()
+        }
+        None => get_api_key(app, provider)?
+            .ok_or_else(|| Error::InvalidInput("no API key configured".into()))?,
+    };
+
+    if provider == Provider::Anthropic {
+        test_anthropic(&api_key, &model).await
+    } else {
+        let url = completions_url(&connector)?;
+        test_openai_compat(&url, &api_key, &model, provider).await
+    }
+}
+
+async fn test_anthropic(api_key: &str, model: &str) -> Result<String> {
+    let body = json!({
+        "model": model,
+        "max_tokens": 1,
+        "messages": [{ "role": "user", "content": "ping" }],
+    });
+    let resp = http_client()
+        .post(ANTHROPIC_URL)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", ANTHROPIC_VERSION)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| Error::InvalidInput(format!("could not reach Anthropic: {e}")))?;
+    finish_test(resp).await
+}
+
+async fn test_openai_compat(
+    url: &str,
+    api_key: &str,
+    model: &str,
+    provider: Provider,
+) -> Result<String> {
+    let body = json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": "ping" }],
+        "max_tokens": 1,
+        "stream": false,
+    });
+    let mut request = http_client()
+        .post(url)
+        .header("content-type", "application/json")
+        .json(&body);
+    if !api_key.is_empty() {
+        request = request.header("authorization", format!("Bearer {api_key}"));
+    }
+    if provider == Provider::Openrouter {
+        request = request
+            .header("http-referer", "https://github.com/WalrusQuant/plume")
+            .header("x-title", "Plume");
+    }
+    let resp = request
+        .send()
+        .await
+        .map_err(|e| Error::InvalidInput(format!("could not reach endpoint: {e}")))?;
+    finish_test(resp).await
+}
+
+async fn finish_test(resp: reqwest::Response) -> Result<String> {
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let snippet = text.chars().take(240).collect::<String>();
+        return Err(Error::InvalidInput(if snippet.is_empty() {
+            format!("HTTP {status}")
+        } else {
+            format!("HTTP {status}: {snippet}")
+        }));
+    }
+    Ok("Connected".into())
+}
+
 pub fn set_tavily_key(app: &AppHandle, key: &str) -> Result<()> {
     store_key(app, TAVILY_KEY_NAME, key)
 }
@@ -1453,9 +1552,11 @@ async fn stream_openai_compat(
             "model": model,
             "messages": convo,
             "stream": true,
-            // ask for a final usage chunk (OpenAI-compatible streaming option)
-            "stream_options": { "include_usage": true },
         });
+        // Known cloud providers honor this; some local servers 400 on unknown fields.
+        if include_stream_usage(provider) {
+            body["stream_options"] = json!({ "include_usage": true });
+        }
         let mut tools: Vec<serde_json::Value> = Vec::new();
         if allow_tools && web_search {
             tools.push(web_search_tool_openai());
@@ -1803,6 +1904,14 @@ mod tests {
         assert!(normalize_completions_url("").is_err());
         assert!(normalize_completions_url("ftp://nope").is_err());
         assert!(normalize_completions_url("localhost:11434").is_err());
+    }
+
+    #[test]
+    fn custom_skips_stream_usage_option() {
+        assert!(include_stream_usage(Provider::Openai));
+        assert!(include_stream_usage(Provider::Grok));
+        assert!(include_stream_usage(Provider::Openrouter));
+        assert!(!include_stream_usage(Provider::Custom));
     }
 
     #[test]

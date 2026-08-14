@@ -4,12 +4,11 @@ import { toast } from "$lib/toast.svelte";
 import { formatError } from "$lib/formatError";
 import { mergeSettings, type AISettings } from "$lib/aiSettings";
 import {
-  OPENROUTER_HISTORY_BUDGET,
-  ANTHROPIC_HISTORY_BUDGET,
   DEFAULT_CHAT_TITLE,
   deriveTitle,
   toApiMessages,
   capHistory,
+  historyBudgetFor,
 } from "$lib/chatHistory";
 
 export { DEFAULT_MODELS } from "$lib/aiSettings";
@@ -82,7 +81,31 @@ class AssistantStore {
   /** The context limit the UI should warn against, or null when there's no
       hard one (Anthropic relies on server-side compaction). */
   get contextLimit(): number | null {
-    return this.settings.provider === "anthropic" ? null : OPENROUTER_HISTORY_BUDGET;
+    return this.settings.provider === "anthropic" ? null : historyBudgetFor(this.settings.provider);
+  }
+
+  connectorName(): string {
+    if (this.settings.provider === "custom") {
+      return (
+        this.settings.customConnectors.find((c) => c.id === this.settings.customId)?.name.trim() ||
+        "Custom"
+      );
+    }
+    switch (this.settings.provider) {
+      case "anthropic":
+        return "Anthropic";
+      case "openai":
+        return "OpenAI";
+      case "grok":
+        return "Grok";
+      case "openrouter":
+        return "OpenRouter";
+    }
+  }
+
+  connectorSummary(): string {
+    const model = this.settings.model.trim();
+    return model ? `${this.connectorName()} · ${model}` : this.connectorName();
   }
 
   connectorSpec(): ConnectorSpec {
@@ -322,11 +345,9 @@ class AssistantStore {
   }
 
   /** History budget for the active provider — Anthropic is a high backstop
-      (server-side compaction does the real work); OpenRouter is a hard cap. */
+      (server-side compaction does the real work); others cap at their window. */
   private historyBudget(): number {
-    return this.settings.provider === "anthropic"
-      ? ANTHROPIC_HISTORY_BUDGET
-      : OPENROUTER_HISTORY_BUDGET;
+    return historyBudgetFor(this.settings.provider);
   }
 
   /** Returns true once the request is accepted (stream started); false if it

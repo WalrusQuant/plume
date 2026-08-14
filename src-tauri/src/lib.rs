@@ -102,6 +102,7 @@ pub fn run() {
             commands::set_custom_api_key,
             commands::has_custom_api_key,
             commands::delete_custom_api_key,
+            commands::test_connector,
             commands::set_tavily_key,
             commands::has_tavily_key,
             commands::delete_tavily_key,

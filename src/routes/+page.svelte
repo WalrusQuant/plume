@@ -818,6 +818,11 @@
     localStorage.setItem(RIGHT_PANE_KEY, String(rightPaneRatio));
   }
 
+  function resetRightPaneWidth() {
+    rightPaneRatio = RIGHT_PANE_MAX;
+    persistRightPaneRatio();
+  }
+
   function startRightPaneResize(e: PointerEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -938,6 +943,14 @@
     const flush = () => void flushSave();
     window.addEventListener("beforeunload", flush);
 
+    const onSettingsKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        settingsOpen = true;
+      }
+    };
+    window.addEventListener("keydown", onSettingsKey);
+
     // Cmd+Q / native close don't reliably fire beforeunload and tear the webview
     // down before an async save resolves — intercept the close, await the flush,
     // then destroy the window (destroy skips the close-requested cycle).
@@ -959,6 +972,7 @@
 
     return () => {
       window.removeEventListener("beforeunload", flush);
+      window.removeEventListener("keydown", onSettingsKey);
       closeUnlisten?.();
       dragUnlisten?.();
       void flushSave();
@@ -1085,8 +1099,9 @@
             class="pane-resize-handle"
             class:pane-resize-handle--dragging={rightPaneResizing}
             aria-label="Resize assistant panel"
-            title="Drag to resize"
+            title="Drag to resize · double-click to reset"
             onpointerdown={startRightPaneResize}
+            ondblclick={resetRightPaneWidth}
             onkeydown={onRightPaneResizeKey}
           ></button>
           <RightPaneTabs activeTab={rightTab} onTabChange={changeRightTab} />

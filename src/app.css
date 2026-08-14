@@ -1655,6 +1655,8 @@ button:focus-visible {
   border-left: 1px solid var(--border);
   scrollbar-width: thin;
   position: relative;
+  container-type: inline-size;
+  container-name: right-pane;
 }
 
 .pane-resize-handle {
@@ -2257,6 +2259,11 @@ button:focus-visible {
   background: var(--sidebar-hover);
 }
 
+.sidebar-folder-header--drop-into {
+  background: var(--accent-surface);
+  outline: 1px solid var(--accent);
+}
+
 .sidebar-folder-header:hover .sidebar-folder-actions {
   opacity: 1;
 }
@@ -2382,6 +2389,10 @@ button:focus-visible {
 
 .right-pane-tab {
   flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 8px 0;
   background: none;
   border: none;
@@ -2393,6 +2404,20 @@ button:focus-visible {
   cursor: pointer;
   text-align: center;
   transition: all 0.15s ease;
+}
+
+.right-pane-tab-icon {
+  display: none;
+  flex-shrink: 0;
+}
+
+@container right-pane (max-width: 400px) {
+  .right-pane-tab-label {
+    display: none;
+  }
+  .right-pane-tab-icon {
+    display: block;
+  }
 }
 
 .right-pane-tab:hover {
@@ -2641,6 +2666,27 @@ button:focus-visible {
   font-size: 12px;
   font-family: var(--font-sans);
   cursor: pointer;
+}
+
+.assistant-connector {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  align-self: center;
+}
+
+.assistant-connector:hover {
+  color: var(--topbar-text);
+  background: var(--sidebar-hover);
 }
 
 .assistant-context {
