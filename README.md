@@ -3,9 +3,11 @@
 **A local-first AI notebook.** Write in markdown with an AI partner that
 actually knows your work — it can semantically search everything you've written,
 bring in reference documents you drop on it, and help you think, draft, and
-edit. Everything stays on your machine.
+edit. Connect a coding agent (Grok, Codex, Claude Code, Cursor) over MCP and it
+reads and writes the same plans you see in the app. Everything stays on your
+machine.
 
-A knowledge workspace for notes, sources, and drafts.
+A knowledge workspace for notes, sources, drafts, and project plans.
 
 ![Plume — the markdown editor with an AI assistant that searches your own documents](docs/screenshot.png)
 
@@ -46,6 +48,10 @@ A knowledge workspace for notes, sources, and drafts.
 - **Cross-document search + @-mention** — full-text search across everything
   you've written (SQLite FTS5), and @-mention past docs to pull them into the
   chat as context
+- **Coding agents (MCP)** — connect Grok, Codex, Claude Code, Cursor, or VS Code
+  to the same notebook. The agent lists projects, reads and updates plans, and
+  captures ideas even when Plume is closed. Copy a snippet from
+  **Settings → Agents**
 - **Idea inbox** — capture a half-formed idea in a quick modal without leaving
   what you're writing, optionally let AI expand it into a draft, then convert it
   into a real document when you're ready
@@ -80,12 +86,13 @@ A knowledge workspace for notes, sources, and drafts.
 | Local search | fastembed (bge-small etc.) — on-device embeddings, brute-force cosine |
 | Import | pdf-extract (PDF) · zip + quick-xml (DOCX) |
 | Documents | docx-rs for Word export |
+| Coding agents | `plume-mcp` stdio server (`rmcp`) over the same SQLite notebook |
 
 ## Connect a coding agent
 
-Plume can expose your notebook to Claude Code, Cursor, Grok, or VS Code over
-MCP (stdio). The agent reads and writes the same project plans you see in the
-app — Plume does not need to be open.
+Plume can expose your notebook to Grok, Codex, Claude Code, Cursor, or VS Code
+over MCP (stdio). The agent reads and writes the same project plans you see in
+the app — Plume does not need to be open.
 
 ```sh
 cargo build -p plume-mcp --release
@@ -166,14 +173,18 @@ Telegram), multiple chats with token usage, version history + restore, inline AI
 edit, idea inbox, Voice & tone, content multiplication, cross-document search +
 @-mention, the project shelf home, and server-side context compaction.
 
-v3 (current): a **local semantic notebook** — on-device embeddings, "search your
+v3: a **local semantic notebook** — on-device embeddings, "search your
 notes," a curated opt-in model picker, and **document import** (Markdown / text /
 PDF / Word) as editable docs or searchable Sources.
 
+v4 (current): **coding agents over MCP** — a stdio `plume-mcp` server so an
+external agent can plan in the same notebook, plus the bundle id
+`com.plumemd.app`.
+
 Direction: Plume is a local-first **AI notebook and knowledge workspace** —
-capture notes and sources, let the AI search everything you've gathered, and
-draft and edit in markdown. Output stays copy/paste + export; there is no
-publishing pipeline.
+capture notes and sources, let the AI search everything you've gathered, draft
+and edit in markdown, and let a coding agent keep project plans in the same
+place. Output stays copy/paste + export; there is no publishing pipeline.
 
 ## License
 

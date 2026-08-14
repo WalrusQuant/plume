@@ -3,11 +3,13 @@
 Local-first Tauri v2 desktop markdown app. Write in markdown with an AI partner
 that knows your work: it **semantically searches everything you've written**
 (on-device embeddings), works with **reference documents you import** (Markdown /
-text / PDF / Word), and helps you think, draft, and edit. Audience: people who
-keep notes, sources, and drafts in one local knowledge workspace.
+text / PDF / Word), and helps you think, draft, and edit. Coding agents connect
+over **MCP** (`plume-mcp` stdio) and read/write the same plans. Audience: people
+who keep notes, sources, drafts, and project plans in one local knowledge
+workspace.
 
 **Direction:** an AI notebook / knowledge workspace (output is copy/paste +
-export, no auto-post). Internal planning/strategy
+export, no auto-post; agents plan in the notebook, not in a chat log). Internal planning/strategy
 notes (product direction, spec + milestone history, correction rules) are kept
 locally and are **not** part of the public repo — this file plus the code are the
 source of truth for contributors.

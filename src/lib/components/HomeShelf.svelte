@@ -354,7 +354,8 @@
         <p>A local-first AI notebook. Capture notes, import sources, and let an
           assistant search everything you've gathered. A <strong>project</strong>
           keeps related documents together; <strong>Ideas</strong> holds quick
-          notes you can expand later.</p>
+          notes you can expand later. Connect a coding agent in
+          <strong>Settings → Agents</strong>.</p>
         <div class="shelf-empty-actions">
           <button class="shelf-empty-btn" onclick={startNewProject} title="Group related documents in one project">Start a project</button>
           <button class="shelf-empty-btn" onclick={onNewPlan} title="A structured plan document">Write a plan</button>

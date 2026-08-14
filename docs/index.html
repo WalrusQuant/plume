@@ -4,31 +4,30 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Plume — a local-first AI notebook</title>
-<meta name="description" content="A local-first AI notebook and knowledge workspace. Write in markdown with an AI partner that actually knows your work — it searches everything you've written, reads the documents you bring in, and helps you think, draft, and edit. Everything stays on your machine." />
+<meta name="description" content="A local-first AI notebook. Write in markdown, search your own notes on-device, and connect a coding agent over MCP so it plans in the same notebook. Everything stays on your machine." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --font-display: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-display: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
     --font-mono: 'IBM Plex Mono', 'SF Mono', monospace;
 
-    /* neutral grays + blue — matches the app's design system */
-    --bg: #161616;
-    --bg-elevated: #1c1c1c;
-    --surface: #1e1e1e;
+    --bg: #141414;
+    --bg-elevated: #1a1a1a;
+    --surface: #1c1c1c;
     --border: #2a2a2a;
     --border-light: #3a3a3a;
 
     --text-primary: #e8e8e8;
-    --text-secondary: #a8a8a8;
+    --text-secondary: #a3a3a3;
     --text-tertiary: #6e6e6e;
 
     --accent: #4a9eff;
     --accent-dim: #3a7ecc;
     --accent-surface: rgba(74, 158, 255, 0.08);
-    --cream: #e8e8e8;
+    --rule: rgba(255, 255, 255, 0.06);
 
     --radius-sm: 6px;
     --radius-md: 10px;
@@ -39,7 +38,6 @@
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
   html { scroll-behavior: smooth; }
 
   body {
@@ -51,237 +49,303 @@
     overflow-x: hidden;
   }
 
-  /* fine paper grain over everything — tactile depth, not flat black */
   body::after {
     content: "";
     position: fixed;
     inset: 0;
     z-index: 2;
     pointer-events: none;
-    opacity: 0.04;
+    opacity: 0.045;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   }
 
   a { color: inherit; text-decoration: none; }
-
   ::selection { background: rgba(74, 158, 255, 0.22); color: #fff; }
 
-  /* ---------- ambient glow ---------- */
   .glow {
     position: fixed;
-    top: -28%;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 1150px;
-    height: 720px;
-    background: radial-gradient(ellipse at center, rgba(74, 158, 255, 0.12), transparent 63%);
+    top: -32%;
+    left: 42%;
+    width: 900px;
+    height: 640px;
+    background: radial-gradient(ellipse at center, rgba(74, 158, 255, 0.11), transparent 64%);
     pointer-events: none;
     z-index: 0;
-    filter: blur(26px);
+    filter: blur(28px);
   }
 
-  .wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+  .wrap { position: relative; z-index: 1; max-width: 1480px; margin: 0 auto; padding: 0 32px; }
 
-  /* ---------- nav ---------- */
   nav {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 26px 0;
+    padding: 24px 0 8px;
   }
-  .brand { display: flex; align-items: center; gap: 11px; font-family: var(--font-display); font-weight: 500; font-size: 1.18rem; letter-spacing: 0.01em; }
+  .brand { display: flex; align-items: center; gap: 11px; font-weight: 500; font-size: 1.12rem; letter-spacing: 0.01em; }
   .brand .mark {
-    width: 32px; height: 32px;
+    width: 30px; height: 30px;
     display: grid; place-items: center;
     background: #1a1a1a;
     border: 1px solid var(--border-light);
-    border-radius: 9px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    font-family: var(--font-display);
+    border-radius: 8px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
     font-weight: 600;
-    font-size: 18px;
+    font-size: 16px;
     line-height: 1;
-    color: var(--cream);
   }
-  .nav-links { display: flex; gap: 28px; align-items: center; font-size: 0.92rem; color: var(--text-secondary); }
+  .nav-links { display: flex; gap: 26px; align-items: center; font-size: 0.9rem; color: var(--text-secondary); }
   .nav-links a { transition: var(--transition); }
   .nav-links a:hover { color: var(--text-primary); }
   .nav-links .ghost {
     border: 1px solid var(--border-light);
-    padding: 7px 16px;
+    padding: 7px 14px;
     border-radius: var(--radius-sm);
     color: var(--text-primary);
-    transition: var(--transition);
   }
   .nav-links .ghost:hover { border-color: var(--accent); background: var(--accent-surface); }
 
-  /* ---------- hero ---------- */
-  .hero { text-align: center; padding: 64px 0 40px; }
-
-  /* one orchestrated load — staggered rise, nothing scattered */
-  .hero > * { animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-  .hero .pill { animation-delay: 0.04s; }
-  .hero h1 { animation-delay: 0.12s; }
-  .hero .sub { animation-delay: 0.22s; }
-  .hero .cta-row { animation-delay: 0.32s; }
-  .hero .shot { animation-delay: 0.44s; }
-  @keyframes rise { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
-  @media (prefers-reduced-motion: reduce) {
-    .hero > * { animation: none; }
-    html { scroll-behavior: auto; }
+  .hero {
+    display: block;
+    padding: 72px 0 12px;
+    text-align: center;
   }
-  .pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-size: 0.8rem; color: var(--text-secondary);
-    border: 1px solid var(--border);
-    background: var(--surface);
-    padding: 6px 14px; border-radius: 999px;
-    margin-bottom: 30px;
+  .hero-copy { max-width: 920px; margin: 0 auto; padding-bottom: 8px; }
+  .kicker {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 18px;
   }
-  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
-
   h1 {
     font-family: var(--font-display);
-    font-size: clamp(2.5rem, 5.6vw, 4.1rem);
-    line-height: 1.07;
+    font-size: clamp(2.6rem, 5.4vw, 4.4rem);
+    line-height: 1.06;
     font-weight: 600;
-    letter-spacing: -0.035em;
-    margin-bottom: 23px;
-    color: var(--cream);
+    letter-spacing: -0.038em;
+    margin-bottom: 20px;
   }
-  h1 .grad {
-    font-weight: 600;
-    background: linear-gradient(115deg, #fff 12%, var(--accent) 92%);
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(115deg, #fff 8%, var(--accent) 92%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
   }
   .sub {
-    font-size: clamp(1.05rem, 2vw, 1.25rem);
+    font-size: 1.08rem;
     color: var(--text-secondary);
-    max-width: 600px;
-    margin: 0 auto 36px;
     font-weight: 300;
     line-height: 1.65;
+    margin: 0 auto 32px;
+    max-width: 640px;
   }
-
-  .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+  .cta-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
   .btn {
-    font-family: inherit; font-size: 0.98rem; font-weight: 500;
-    padding: 13px 26px; border-radius: var(--radius-sm);
+    font-family: inherit; font-size: 0.95rem; font-weight: 500;
+    padding: 12px 22px; border-radius: var(--radius-sm);
     cursor: pointer; transition: var(--transition); border: 1px solid transparent;
-    display: inline-flex; align-items: center; gap: 9px;
+    display: inline-flex; align-items: center; gap: 8px;
   }
   .btn-primary {
     background: var(--accent); color: #fff;
-    box-shadow: 0 6px 20px rgba(74, 158, 255, 0.3);
+    box-shadow: 0 6px 20px rgba(74, 158, 255, 0.28);
   }
-  .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); box-shadow: 0 10px 28px rgba(74, 158, 255, 0.4); }
-  .btn-secondary { background: var(--surface); border-color: var(--border-light); color: var(--text-primary); }
+  .btn-primary:hover { background: var(--accent-dim); transform: translateY(-1px); }
+  .btn-secondary { background: var(--surface); border-color: var(--border-light); }
   .btn-secondary:hover { border-color: var(--accent); background: var(--accent-surface); }
 
-  /* ---------- screenshot frame ---------- */
-  .shot { margin: 56px auto 0; max-width: 1000px; }
+  .hero-copy, .shot, .lanes, .pillars, .flow, .closing { animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .hero-copy { animation-delay: 0.06s; }
+  .shot { animation-delay: 0.18s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-copy, .shot, .lanes, .pillars, .flow, .closing { animation: none; }
+    html { scroll-behavior: auto; }
+  }
+
+  .shot { margin: 48px 0 0; max-width: none; }
   .window {
     border: 1px solid var(--border-light);
     border-radius: var(--radius-lg);
     overflow: hidden;
     background: var(--bg-elevated);
-    box-shadow: 0 40px 120px -30px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.02);
+    box-shadow: 0 32px 90px -28px rgba(0, 0, 0, 0.78), 0 0 0 1px rgba(255, 255, 255, 0.02);
   }
   .titlebar {
     display: flex; align-items: center; gap: 8px;
-    padding: 12px 16px;
+    padding: 10px 14px;
     background: #181818;
     border-bottom: 1px solid var(--border);
   }
-  .titlebar .dots { display: flex; gap: 7px; }
-  .titlebar .dots span { width: 12px; height: 12px; border-radius: 50%; }
+  .titlebar .dots { display: flex; gap: 6px; }
+  .titlebar .dots span { width: 10px; height: 10px; border-radius: 50%; }
   .titlebar .dots .r { background: #ff5f57; }
   .titlebar .dots .y { background: #febc2e; }
   .titlebar .dots .g { background: #28c840; }
-  .titlebar .label { margin-left: 12px; font-size: 0.8rem; color: var(--text-tertiary); font-family: var(--font-mono); }
+  .titlebar .label { margin-left: 10px; font-size: 0.76rem; color: var(--text-tertiary); font-family: var(--font-mono); }
   .window img { display: block; width: 100%; height: auto; }
 
-  /* ---------- marquee strip ---------- */
-  .strip {
-    margin-top: 80px; padding: 22px 0;
-    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
-    display: flex; justify-content: center; flex-wrap: wrap; gap: 14px 40px;
-    color: var(--text-tertiary); font-size: 0.85rem; font-family: var(--font-mono);
-  }
-  .strip span { white-space: nowrap; }
-  .strip b { color: var(--accent); font-weight: 500; }
-
-  /* ---------- features ---------- */
-  section { padding: 96px 0; }
-  section.wrap { padding-top: 96px; padding-bottom: 96px; }
-  .eyebrow { color: var(--accent); font-size: 0.82rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; margin-bottom: 14px; }
-  .section-title { font-family: var(--font-display); font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 600; letter-spacing: -0.025em; text-align: center; margin-bottom: 16px; color: var(--cream); }
-  .section-lede { text-align: center; color: var(--text-secondary); max-width: 560px; margin: 0 auto 56px; font-weight: 300; }
-
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: 26px 24px;
-    transition: var(--transition);
-  }
-  .card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.7); }
-  .card .ico {
-    width: 42px; height: 42px; border-radius: 10px;
-    background: var(--accent-surface); color: var(--accent);
-    border: 1px solid rgba(74, 158, 255, 0.2);
-    display: grid; place-items: center; font-size: 19px; margin-bottom: 16px;
-  }
-  .card h3 { font-family: var(--font-display); font-size: 1.08rem; font-weight: 600; margin-bottom: 7px; letter-spacing: -0.01em; color: var(--cream); }
-  .card p { color: var(--text-secondary); font-size: 0.93rem; font-weight: 300; }
-
-  /* ---------- flow / knowledge workspace ---------- */
-  .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 880px; margin: 0 auto; }
-  .step { text-align: center; padding: 0 22px; position: relative; }
-  .step:not(:last-child)::after {
-    content: "→"; position: absolute; right: -10px; top: 14px;
-    color: var(--border-light); font-size: 1.3rem;
-  }
-  .step .n {
-    width: 44px; height: 44px; margin: 0 auto 16px;
-    display: grid; place-items: center; border-radius: 50%;
-    border: 1px solid var(--accent); color: var(--accent);
-    font-family: var(--font-mono); font-size: 0.95rem;
-    background: var(--accent-surface);
-  }
-  .step h4 { font-family: var(--font-display); font-size: 1.06rem; font-weight: 600; margin-bottom: 8px; color: var(--cream); }
-  .step p { color: var(--text-secondary); font-size: 0.9rem; font-weight: 300; }
-
-  /* ---------- closing CTA ---------- */
+  .lanes,
+  section,
   .closing {
-    text-align: center;
-    background: radial-gradient(ellipse at center, var(--accent-surface), transparent 70%);
+    max-width: 1080px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .lanes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin-top: 88px;
+    margin-bottom: 16px;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 72px 32px;
-    margin-bottom: 40px;
+    overflow: hidden;
+    background: var(--surface);
   }
-  .closing h2 { font-family: var(--font-display); font-size: clamp(1.9rem, 4vw, 2.7rem); font-weight: 600; letter-spacing: -0.03em; margin-bottom: 14px; color: var(--cream); }
-  .closing p { color: var(--text-secondary); max-width: 480px; margin: 0 auto 30px; font-weight: 300; }
-  .price-note { margin-top: 18px; font-size: 0.85rem; color: var(--text-tertiary); }
+  .lane { padding: 36px 34px 40px; }
+  .lane + .lane { border-left: 1px solid var(--border); }
+  .lane .tag {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    margin-bottom: 12px;
+  }
+  .lane h2 {
+    font-size: 1.55rem;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    margin-bottom: 12px;
+    line-height: 1.2;
+  }
+  .lane p { color: var(--text-secondary); font-weight: 300; font-size: 0.98rem; margin-bottom: 22px; max-width: 40ch; }
+  .lane ul { list-style: none; }
+  .lane li {
+    padding: 9px 0;
+    border-top: 1px solid var(--rule);
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    font-weight: 300;
+  }
+  .lane li strong { color: var(--text-primary); font-weight: 500; }
+  .lane.agent { background: linear-gradient(180deg, rgba(74, 158, 255, 0.05), transparent 70%); }
 
-  /* ---------- footer ---------- */
+  section { padding: 88px 0; }
+  .eyebrow {
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: clamp(1.7rem, 3.4vw, 2.35rem);
+    font-weight: 600;
+    letter-spacing: -0.03em;
+    margin-bottom: 12px;
+    max-width: 18ch;
+  }
+  .section-lede { color: var(--text-secondary); max-width: 52ch; font-weight: 300; margin-bottom: 40px; }
+
+  .pillars { display: grid; gap: 14px; }
+  .pillar {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 28px;
+    align-items: start;
+    padding: 26px 28px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+  }
+  .pillar h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  .pillar .num {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--accent);
+    margin-bottom: 8px;
+    letter-spacing: 0.08em;
+  }
+  .pillar p { color: var(--text-secondary); font-size: 0.92rem; font-weight: 300; }
+  .bits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .bit {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    padding: 5px 9px;
+    border-radius: 999px;
+  }
+
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+  .step {
+    padding: 8px 4px 0 0;
+    border-top: 1px solid var(--border);
+    padding-top: 22px;
+  }
+  .step .n {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+  .step h4 { font-size: 1.08rem; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.02em; }
+  .step p { color: var(--text-secondary); font-size: 0.92rem; font-weight: 300; }
+
+  .closing {
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 56px 48px;
+    margin-top: 20px;
+    margin-bottom: 40px;
+    background:
+      radial-gradient(ellipse at 50% 0%, var(--accent-surface), transparent 55%),
+      var(--surface);
+  }
+  .closing h2 { font-size: clamp(1.8rem, 3.6vw, 2.5rem); letter-spacing: -0.03em; margin-bottom: 12px; }
+  .closing p { color: var(--text-secondary); max-width: 48ch; margin: 0 auto 26px; font-weight: 300; }
+  .closing .cta-row { justify-content: center; }
+  .price-note { margin-top: 16px; font-size: 0.82rem; color: var(--text-tertiary); font-family: var(--font-mono); }
+
   footer {
     border-top: 1px solid var(--border);
-    padding: 36px 0;
+    padding: 28px 0 40px;
     display: flex; align-items: center; justify-content: space-between;
-    color: var(--text-tertiary); font-size: 0.85rem; flex-wrap: wrap; gap: 14px;
+    color: var(--text-tertiary); font-size: 0.84rem; flex-wrap: wrap; gap: 12px;
   }
-  footer .brand { font-size: 0.95rem; color: var(--text-secondary); }
+  footer .brand { font-size: 0.92rem; color: var(--text-secondary); }
 
-  @media (max-width: 760px) {
-    .grid { grid-template-columns: 1fr; }
-    .flow { grid-template-columns: 1fr; gap: 32px; }
-    .step:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -26px; transform: translateX(50%); }
+  @media (max-width: 860px) {
+    .hero { padding-top: 40px; }
+    .shot { margin-top: 32px; }
+    .lanes { grid-template-columns: 1fr; }
+    .lane + .lane { border-left: none; border-top: 1px solid var(--border); }
+    .pillar { grid-template-columns: 1fr; gap: 10px; }
+    .flow { grid-template-columns: 1fr; }
     .nav-links .links-inline { display: none; }
+    .closing { padding: 36px 24px; }
   }
 </style>
 </head>
@@ -292,8 +356,8 @@
   <nav>
     <div class="brand"><span class="mark">P</span> Plume</div>
     <div class="nav-links">
-      <span class="links-inline" style="display:flex; gap:28px;">
-        <a href="#features">Features</a>
+      <span class="links-inline" style="display:flex; gap:26px;">
+        <a href="#notebook">Notebook</a>
         <a href="#how">How it works</a>
         <a href="https://github.com/WalrusQuant/plume#readme" target="_blank" rel="noopener">Docs</a>
       </span>
@@ -302,128 +366,143 @@
   </nav>
 
   <header class="hero">
-    <h1>The notebook that<br /><span class="grad">knows your notes.</span></h1>
-    <p class="sub">
-      Plume is a local-first knowledge workspace. Write in markdown, bring in
-      the documents you rely on, and work with an AI partner that can search
-      everything you've gathered — all on your machine.
-    </p>
-    <div class="cta-row">
-      <a class="btn btn-primary" href="#get">Get Plume <span aria-hidden="true">→</span></a>
-      <a class="btn btn-secondary" href="#features">See what it does</a>
+    <div class="hero-copy">
+      <p class="kicker">Local-first AI notebook</p>
+      <h1>The notebook your agent can<br /><em>actually open.</em></h1>
+      <p class="sub">
+        Write in markdown. Search your own notes on this machine. Connect
+        Grok, Codex, Claude Code, or Cursor — they plan in the same files
+        you see in Plume.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#get">Get Plume <span aria-hidden="true">→</span></a>
+        <a class="btn btn-secondary" href="#notebook">See the workspace</a>
+      </div>
     </div>
-
     <div class="shot">
       <div class="window">
         <div class="titlebar">
           <div class="dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
           <span class="label">plume — welcome.md</span>
         </div>
-        <img src="screenshot.png" alt="Plume — markdown editor with an AI assistant that searches your own documents" />
+        <img src="screenshot.png" alt="Plume — markdown notebook with an AI assistant that searches your own documents" />
       </div>
     </div>
   </header>
-</div>
 
-<div class="strip">
-  <span><b>Markdown</b> editor + live preview</span>
-  <span><b>AI</b> that searches your notes</span>
-  <span><b>Bring in</b> PDF, Word &amp; markdown</span>
-  <span><b>Notes</b>, sources &amp; drafts</span>
-  <span><b>Local</b> &amp; private by default</span>
-</div>
-
-<section id="features" class="wrap">
-  <div class="eyebrow">Everything, on your machine</div>
-  <h2 class="section-title">An AI partner that knows what you've written</h2>
-  <p class="section-lede">Write in a fast, private markdown editor. Let an AI partner search your own notes, work from documents you bring in, and help you think and draft. Same app — your call, every time.</p>
-
-  <div class="grid">
-    <div class="card">
-      <div class="ico">✎</div>
-      <h3>Markdown editor</h3>
-      <p>CodeMirror 6 with a formatting toolbar, syntax highlighting, and a live GitHub-flavored preview rendered by the same engine that drives every export.</p>
+  <div class="lanes" id="notebook">
+    <div class="lane">
+      <div class="tag">You</div>
+      <h2>A private notebook</h2>
+      <p>Markdown on the left, a live preview on the right. An AI partner that can search everything you’ve gathered — notes, PDFs, Word files — without sending the corpus out.</p>
+      <ul>
+        <li><strong>Editor + preview</strong> — one markdown engine for both</li>
+        <li><strong>Search your notes</strong> — on-device embeddings, opt-in</li>
+        <li><strong>Sources</strong> — import as editable docs or read-only reference</li>
+        <li><strong>Ideas inbox</strong> — capture a thought without leaving the page</li>
+      </ul>
     </div>
-    <div class="card">
-      <div class="ico">✦</div>
-      <h3>AI partner</h3>
-      <p>Streaming chat with your document as context. Multiple threads per doc, token usage shown, and a Voice &amp; tone you set once so everything sounds like you.</p>
-    </div>
-    <div class="card">
-      <div class="ico">⌕</div>
-      <h3>Search your notes</h3>
-      <p>The assistant semantically searches everything you've written and answers grounded in your own documents. A small embedding model runs entirely on your machine — nothing is sent out. Opt-in: download a model once in Settings.</p>
-    </div>
-    <div class="card">
-      <div class="ico">⤓</div>
-      <h3>Bring in your documents</h3>
-      <p>Import Markdown, plain text, PDF, and Word .docx — either as editable documents, or as read-only Sources the AI can search but you never touch. Add and remove them freely.</p>
-    </div>
-    <div class="card">
-      <div class="ico">⌁</div>
-      <h3>Inline edit</h3>
-      <p>Select a sentence, get a streamed rewrite previewed right in place, then accept or reject — no round trip through a chat box.</p>
-    </div>
-    <div class="card">
-      <div class="ico">◍</div>
-      <h3>Web search, when you want it</h3>
-      <p>Toggle web search on in a chat and the assistant can pull in fresh information from the web. Off by default — it only reaches out when you ask it to.</p>
-    </div>
-    <div class="card">
-      <div class="ico">⧉</div>
-      <h3>Reshape a note</h3>
-      <p>Turn a finished note into another format — blog, newsletter, LinkedIn, X thread — each a linked, editable document.</p>
-    </div>
-    <div class="card">
-      <div class="ico">↗</div>
-      <h3>Export anywhere</h3>
-      <p>Real Word .docx with heading styles, numbering, checkboxes, hyperlinks and tables. Plus X threads and X Articles, LinkedIn-ready text, and clean self-contained HTML.</p>
-    </div>
-    <div class="card">
-      <div class="ico">▢</div>
-      <h3>Yours, locally</h3>
-      <p>Ideas inbox, version history, and folders keep everything in one SQLite database on your machine. Keys live in the macOS Keychain — the only thing that leaves is what you send your AI provider.</p>
+    <div class="lane agent">
+      <div class="tag">Your coding agent</div>
+      <h2>Same notebook, via MCP</h2>
+      <p>The agent launches a small local server. It reads and writes project plans even when Plume is closed. Nothing is uploaded. Settings → Agents copies the snippet.</p>
+      <ul>
+        <li><strong>Grok, Codex, Claude Code, Cursor</strong></li>
+        <li><strong>list / read / update plans</strong> in your projects</li>
+        <li><strong>stdio</strong> — no open window, no token, no cloud</li>
+        <li><strong>Same SQLite file</strong> the app uses</li>
+      </ul>
     </div>
   </div>
-</section>
 
-<section id="how" class="wrap">
-  <div class="eyebrow">Knowledge workspace</div>
-  <h2 class="section-title">How it flows</h2>
-  <p class="section-lede">Capture a note, bring in a source, or start a draft. Search everything you've gathered, then take it further when you're ready.</p>
+  <section>
+    <div class="eyebrow">On this machine</div>
+    <h2 class="section-title">What the workspace holds</h2>
+    <p class="section-lede">Not a wall of features. Three jobs the notebook is built to do.</p>
+    <div class="pillars">
+      <article class="pillar">
+        <div>
+          <span class="num">01</span>
+          <h3>Gather</h3>
+        </div>
+        <div>
+          <p>Drop markdown, text, PDF, or Word. Keep a piece as a document you edit, or as a Source the assistant can search. Projects group related pages; Ideas holds the scraps.</p>
+          <div class="bits" style="margin-top:14px;">
+            <span class="bit">Import</span>
+            <span class="bit">Projects</span>
+            <span class="bit">Ideas inbox</span>
+            <span class="bit">Version history</span>
+          </div>
+        </div>
+      </article>
+      <article class="pillar">
+        <div>
+          <span class="num">02</span>
+          <h3>Think</h3>
+        </div>
+        <div>
+          <p>Chat with the open page. Search your notes on-device. Rewrite a sentence in place. Set Voice &amp; tone once. Turn web search on only when you want it.</p>
+          <div class="bits" style="margin-top:14px;">
+            <span class="bit">Streaming chat</span>
+            <span class="bit">Local search</span>
+            <span class="bit">Inline edit</span>
+            <span class="bit">Web search</span>
+          </div>
+        </div>
+      </article>
+      <article class="pillar">
+        <div>
+          <span class="num">03</span>
+          <h3>Hand off</h3>
+        </div>
+        <div>
+          <p>Leave it in the notebook, reshape it for another format, or export to Word, HTML, markdown, or a social paste. A coding agent can keep the living plan here while it works in the repo.</p>
+          <div class="bits" style="margin-top:14px;">
+            <span class="bit">MCP agents</span>
+            <span class="bit">Word / HTML</span>
+            <span class="bit">Multiply</span>
+            <span class="bit">Clipboard export</span>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
 
-  <div class="flow">
-    <div class="step">
-      <div class="n">1</div>
-      <h4>Capture &amp; gather</h4>
-      <p>Drop a half-formed thought into the Ideas inbox, start a fresh markdown doc, or bring in existing notes, PDFs, and Word files.</p>
+  <section id="how">
+    <div class="eyebrow">How it flows</div>
+    <h2 class="section-title">One place for the work</h2>
+    <p class="section-lede">Capture, think, keep the plan. The window and the agent share the same files.</p>
+    <div class="flow">
+      <div class="step">
+        <div class="n">01 — Capture</div>
+        <h4>Put it in the notebook</h4>
+        <p>Start a page, drop a file, or park a half-formed idea. Projects keep a piece of work together.</p>
+      </div>
+      <div class="step">
+        <div class="n">02 — Think</div>
+        <h4>Ask the notes, or the agent</h4>
+        <p>Search what you’ve written. Draft in the assistant. Or let a coding agent update the plan over MCP.</p>
+      </div>
+      <div class="step">
+        <div class="n">03 — Keep</div>
+        <h4>Stay, or take it out</h4>
+        <p>The plan lives here. Export to Word or HTML when something has to leave the machine.</p>
+      </div>
     </div>
-    <div class="step">
-      <div class="n">2</div>
-      <h4>Draft with AI</h4>
-      <p>The partner works from your document, your own notes, and any Sources you've added — writing in the voice you defined once.</p>
-    </div>
-    <div class="step">
-      <div class="n">3</div>
-      <h4>Keep it, or take it out</h4>
-      <p>Leave it in your notebook, turn it into another format, or export clean to Word, HTML, or markdown.</p>
-    </div>
-  </div>
-</section>
+  </section>
 
-<div class="wrap">
   <div id="get" class="closing">
     <h2>Your notebook, your machine</h2>
-    <p>Plume is local-first and bring-your-own-key. Your notes, your sources, and the model that searches them all stay on your machine. No subscription, no lock-in — just a tool that gets out of your way.</p>
+    <p>Local-first and bring-your-own-key. Notes, sources, the search model, and the plans your agent writes stay on disk. No subscription.</p>
     <div class="cta-row">
       <a class="btn btn-primary" href="https://github.com/WalrusQuant/plume">View on GitHub <span aria-hidden="true">→</span></a>
     </div>
-    <div class="price-note">Free &amp; open source · bring your own Anthropic or OpenRouter key</div>
+    <div class="price-note">Free &amp; open source · Anthropic or OpenRouter key</div>
   </div>
 
   <footer>
-    <div class="brand"><span class="mark" style="width:26px;height:26px;font-size:15px;border-radius:7px;">P</span> Plume</div>
-    <div>Your local-first AI notebook. © 2026</div>
+    <div class="brand"><span class="mark" style="width:24px;height:24px;font-size:14px;border-radius:6px;">P</span> Plume</div>
+    <div>A local-first AI notebook. © 2026</div>
   </footer>
 </div>
 

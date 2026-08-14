@@ -40,6 +40,15 @@ documents never leave your computer.
 
 ---
 
+## Coding agents
+
+A coding agent (Grok, Codex, Claude Code, Cursor) can connect to this notebook
+over MCP and update project plans even when Plume is closed. Open
+**Settings → Agents**, copy the snippet for your agent, and it talks to the
+same files you see here.
+
+---
+
 ## What is markdown?
 
 Markdown formats text with a few plain symbols. You write on the left; the
@@ -92,6 +101,7 @@ function greet(name) {
 | Markdown syntax    | Guide tab         |
 | AI partner         | Assistant tab     |
 | Search your notes  | Settings → Local search |
+| Coding agents      | Settings → Agents |
 | Version history    | History tab       |
 
 ---
