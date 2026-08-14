@@ -1142,7 +1142,7 @@
             </div>
           {:else if rightTab === "cheatsheet"}
             <div id="right-panel-cheatsheet" role="tabpanel" aria-labelledby="right-tab-cheatsheet" class="preview-panel-body">
-            <CheatsheetPanel />
+            <CheatsheetPanel {editorView} />
             </div>
           {:else}
             <div id="right-panel-assistant" role="tabpanel" aria-labelledby="right-tab-assistant" class="preview-panel-body">
