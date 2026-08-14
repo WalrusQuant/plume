@@ -80,45 +80,45 @@
 }
 
 /* ---------------------------------------------------------
-   Tokens — Light (clean whites, no warm tint)
+   Tokens — Light (dimmed cool grays, no warm tint)
    --------------------------------------------------------- */
 
 [data-theme="light"] {
-  --sidebar-bg: #f6f6f6;
-  --sidebar-surface: #ffffff;
+  --sidebar-bg: #eaeaea;
+  --sidebar-surface: #eaeaea;
   --sidebar-width: 260px;
   --sidebar-width-narrow: 200px;
-  --sidebar-text: #1a1a1a;
-  --sidebar-muted: #888888;
-  --sidebar-hover: rgba(0, 0, 0, 0.03);
-  --sidebar-active: rgba(0, 0, 0, 0.06);
-  --sidebar-border: #e5e5e5;
+  --sidebar-text: #111111;
+  --sidebar-muted: #555555;
+  --sidebar-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-active: rgba(0, 0, 0, 0.08);
+  --sidebar-border: #d4d4d4;
 
-  --editor-bg: #ffffff;
-  --shelf-hover: rgba(0, 0, 0, 0.025);
-  --preview-bg: #fafafa;
-  --preview-text: #1f1f1f;
-  --preview-text-secondary: #555555;
-  --preview-text-tertiary: #999999;
-  --preview-code-bg: #f4f4f4;
+  --editor-bg: #eaeaea;
+  --shelf-hover: rgba(0, 0, 0, 0.04);
+  --preview-bg: #eaeaea;
+  --preview-text: #111111;
+  --preview-text-secondary: #333333;
+  --preview-text-tertiary: #555555;
+  --preview-code-bg: #e4e4e4;
   --preview-code-inline-color: #0550ae;
   --preview-code-inline-bg: rgba(5, 80, 174, 0.06);
-  --preview-th-bg: #f4f4f4;
+  --preview-th-bg: #e4e4e4;
   --preview-link: #0969da;
   --preview-heading: #111111;
-  --preview-blockquote-border: #d0d7de;
-  --preview-hr: #e5e5e5;
-  --preview-table-stripe: rgba(0, 0, 0, 0.02);
+  --preview-blockquote-border: #c8c8c8;
+  --preview-hr: #d4d4d4;
+  --preview-table-stripe: rgba(0, 0, 0, 0.03);
 
-  --toolbar-bg: #f9f9f9;
-  --toolbar-border: #e5e5e5;
-  --toolbar-btn-hover: rgba(0, 0, 0, 0.05);
-  --toolbar-text: #888888;
-  --toolbar-text-hover: #1a1a1a;
+  --toolbar-bg: #eaeaea;
+  --toolbar-border: #d4d4d4;
+  --toolbar-btn-hover: rgba(0, 0, 0, 0.06);
+  --toolbar-text: #444444;
+  --toolbar-text-hover: #111111;
 
-  --topbar-bg: #f0f0f0;
-  --topbar-text: #1a1a1a;
-  --topbar-muted: #999999;
+  --topbar-bg: #eaeaea;
+  --topbar-text: #111111;
+  --topbar-muted: #555555;
 
   --accent: #0969da;
   --accent-dim: #0550ae;
@@ -126,14 +126,14 @@
   --accent-surface-strong: rgba(9, 105, 218, 0.12);
   --accent-text: #ffffff;
 
-  --status-bg: #f0f0f0;
-  --status-text: #999999;
+  --status-bg: #eaeaea;
+  --status-text: #555555;
 
-  --border: #e5e5e5;
-  --border-light: #d5d5d5;
-  --text-primary: #1a1a1a;
-  --text-secondary: #555555;
-  --text-tertiary: #999999;
+  --border: #d4d4d4;
+  --border-light: #c8c8c8;
+  --text-primary: #111111;
+  --text-secondary: #333333;
+  --text-tertiary: #555555;
   --danger: #cf222e;
   --danger-surface: rgba(207, 34, 46, 0.06);
   --success: #1a7f37;
@@ -952,6 +952,7 @@ button:focus-visible {
   gap: 8px;
   margin-bottom: 1px;
   position: relative;
+  user-select: none;
 }
 
 .sidebar-item:hover {
@@ -977,6 +978,12 @@ button:focus-visible {
 /* Drag-and-drop reordering: the dragged row dims; the row under the pointer
    shows a 2px accent line on the edge the drop will land. ::after sits clear
    of .sidebar-item--active's ::before, and is inset so it never shifts layout. */
+.sidebar--reordering,
+.sidebar--reordering * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
 .sidebar-item--dragging,
 .sidebar-folder-header--dragging {
   opacity: 0.4;
@@ -1200,6 +1207,7 @@ button:focus-visible {
   font-size: 13px;
   font-family: var(--font-sans);
   outline: none;
+  user-select: text;
 }
 
 /* Empty sidebar */
@@ -1962,6 +1970,10 @@ button:focus-visible {
   max-height: 85vh;
   overflow-y: auto;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.dialog--wide {
+  width: 560px;
 }
 
 .dialog-header {

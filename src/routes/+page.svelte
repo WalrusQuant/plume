@@ -852,9 +852,11 @@
           stageImport(paths);
         } else if (event.payload.type === "leave") {
           dragOver = false;
-        } else {
-          dragOver = true; // enter / over
+        } else if (event.payload.type === "enter") {
+          // Only hint for real Finder files — in-app sidebar reorder has no paths.
+          dragOver = event.payload.paths.length > 0;
         }
+        // "over" keeps the current hint; it doesn't carry paths.
       })
       .then((un) => (dragUnlisten = un));
 

@@ -118,17 +118,22 @@
   const tree = $derived(buildSidebarTree(folders, documents));
   const moveDoc = $derived(documents.find((d) => d.id === moveDocId));
 
-  // ----- drag-and-drop reordering -----
+  // ----- pointer reordering -----
   //
-  // Reorder-only, and only within a row's own section. A section is one
-  // contiguous orderable list: a folder's docs (keyed by folder id), the
-  // unfiled docs ("unfiled"), the Inbox ideas ("inbox"), or the folders
-  // themselves ("folders"). Cross-section moves stay on MoveToFolderMenu —
-  // dragover only accepts (preventDefault) when kind + section match the drag
-  // source, so foreign targets show the no-drop cursor and can't receive a drop.
+  // HTML5 drag-and-drop starts an OS drag. With Tauri's file-drop handler on,
+  // macOS treats that as "copy a file into the window" (green plus + the
+  // import overlay) and the in-app drop never fires. Pointer capture stays
+  // inside the webview, so reorder doesn't collide with drop-to-import.
+  //
+  // Reorder-only, and only within a row's own section: a folder's docs
+  // (keyed by folder id), unfiled docs ("unfiled"), Inbox ideas ("inbox"),
+  // or the folders themselves ("folders"). Cross-section moves stay on
+  // MoveToFolderMenu.
   type DragKind = "doc" | "folder";
+  const DRAG_THRESHOLD_PX = 5;
   let dragSource = $state<{ kind: DragKind; id: string; section: string } | null>(null);
   let dropTarget = $state<{ id: string; edge: "before" | "after" } | null>(null);
+  let suppressClick = false;
 
   /** The ordered id list of a section, read from the already-sorted tree. */
   function sectionIdsFor(section: string): string[] {
@@ -139,59 +144,105 @@
     return folder ? folder.documents.map((d) => d.id) : [];
   }
 
-  function handleDragStart(e: DragEvent, kind: DragKind, id: string, section: string) {
-    // never start a drag from a row that's mid-rename (draggable is already off,
-    // but guard anyway)
-    if (kind === "doc" && editingId === id) return;
-    if (kind === "folder" && editingFolderId === id) return;
-    dragSource = { kind, id, section };
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      // WebKit refuses to begin a drag unless some data is attached
-      e.dataTransfer.setData("text/plain", id);
-    }
+  function isReorderFrom(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    return !target.closest("button, input, a, .sidebar-expand-menu");
   }
 
-  function handleDragOver(e: DragEvent, kind: DragKind, id: string, section: string) {
-    if (!dragSource || dragSource.kind !== kind || dragSource.section !== section) return;
-    if (dragSource.id === id) {
-      dropTarget = null;
-      return;
-    }
-    e.preventDefault(); // accept the drop (omitting this = no-drop cursor)
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; // move arrow, not copy badge
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const edge = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    dropTarget = { id, edge };
-  }
-
-  function handleDrop(e: DragEvent, kind: DragKind, id: string, section: string) {
-    e.preventDefault();
-    const source = dragSource;
-    const edge = dropTarget?.edge ?? "before";
-    // clear here: the reorder re-renders and may recycle this node before
-    // dragend would fire
-    dragSource = null;
-    dropTarget = null;
-    if (!source || source.kind !== kind || source.section !== section) return;
-    if (source.id === id) return;
-
-    const ids = sectionIdsFor(section);
+  function applyDrop(source: { kind: DragKind; id: string; section: string }, targetId: string, edge: "before" | "after") {
+    if (source.id === targetId) return;
+    const ids = sectionIdsFor(source.section);
     const from = ids.indexOf(source.id);
     if (from === -1) return;
     ids.splice(from, 1);
-    let to = ids.indexOf(id);
+    let to = ids.indexOf(targetId);
     if (to === -1) return;
     if (edge === "after") to += 1;
     ids.splice(to, 0, source.id);
-
-    if (kind === "folder") onReorderFolders(ids);
+    if (source.kind === "folder") onReorderFolders(ids);
     else onReorderDocuments(ids);
   }
 
-  function handleDragEnd() {
-    dragSource = null;
-    dropTarget = null;
+  function updateDropTarget(clientX: number, clientY: number) {
+    if (!dragSource) return;
+    const hit = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>("[data-reorder-id]");
+    if (!hit) {
+      dropTarget = null;
+      return;
+    }
+    const kind = hit.dataset.reorderKind as DragKind | undefined;
+    const id = hit.dataset.reorderId;
+    const section = hit.dataset.reorderSection;
+    if (!kind || !id || !section) {
+      dropTarget = null;
+      return;
+    }
+    if (kind !== dragSource.kind || section !== dragSource.section || id === dragSource.id) {
+      dropTarget = null;
+      return;
+    }
+    const rect = hit.getBoundingClientRect();
+    dropTarget = { id, edge: clientY < rect.top + rect.height / 2 ? "before" : "after" };
+  }
+
+  function handlePointerDown(e: PointerEvent, kind: DragKind, id: string, section: string) {
+    if (e.button !== 0) return;
+    if (kind === "doc" && editingId === id) return;
+    if (kind === "folder" && editingFolderId === id) return;
+    if (!isReorderFrom(e.target)) return;
+
+    const originX = e.clientX;
+    const originY = e.clientY;
+    let started = false;
+    window.getSelection()?.removeAllRanges();
+
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      if (!started) {
+        const dx = ev.clientX - originX;
+        const dy = ev.clientY - originY;
+        if (dx * dx + dy * dy < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) return;
+        started = true;
+        suppressClick = true;
+        dragSource = { kind, id, section };
+      }
+      updateDropTarget(ev.clientX, ev.clientY);
+    };
+
+    const stop = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("keydown", onKey);
+      const source = dragSource;
+      const target = dropTarget;
+      dragSource = null;
+      dropTarget = null;
+      if (started && source && target) applyDrop(source, target.id, target.edge);
+      if (started) ev.preventDefault();
+      // click may not fire if the pointer was released on another row
+      requestAnimationFrame(() => {
+        suppressClick = false;
+      });
+    };
+
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      dragSource = null;
+      dropTarget = null;
+      started = false;
+      suppressClick = false;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      window.removeEventListener("keydown", onKey);
+    };
+
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+    window.addEventListener("keydown", onKey);
   }
 
   // Cross-document full-text search. Non-empty query replaces the tree with
@@ -309,12 +360,17 @@
     class:sidebar-item--dragging={dragSource?.id === doc.id}
     class:sidebar-item--drop-before={dropTarget?.id === doc.id && dropTarget.edge === "before"}
     class:sidebar-item--drop-after={dropTarget?.id === doc.id && dropTarget.edge === "after"}
-    draggable={editingId !== doc.id}
-    ondragstart={(e) => handleDragStart(e, "doc", doc.id, section)}
-    ondragover={(e) => handleDragOver(e, "doc", doc.id, section)}
-    ondrop={(e) => handleDrop(e, "doc", doc.id, section)}
-    ondragend={handleDragEnd}
-    onclick={() => onSelect(doc.id)}
+    data-reorder-kind="doc"
+    data-reorder-id={doc.id}
+    data-reorder-section={section}
+    onpointerdown={(e) => handlePointerDown(e, "doc", doc.id, section)}
+    onclick={() => {
+      if (suppressClick) {
+        suppressClick = false;
+        return;
+      }
+      onSelect(doc.id);
+    }}
     onkeydown={(e) => activateOn(e, () => onSelect(doc.id))}
     role="button"
     tabindex="0"
@@ -419,12 +475,17 @@
     class:sidebar-item--dragging={dragSource?.id === doc.id}
     class:sidebar-item--drop-before={dropTarget?.id === doc.id && dropTarget.edge === "before"}
     class:sidebar-item--drop-after={dropTarget?.id === doc.id && dropTarget.edge === "after"}
-    draggable="true"
-    ondragstart={(e) => handleDragStart(e, "doc", doc.id, "inbox")}
-    ondragover={(e) => handleDragOver(e, "doc", doc.id, "inbox")}
-    ondrop={(e) => handleDrop(e, "doc", doc.id, "inbox")}
-    ondragend={handleDragEnd}
-    onclick={() => onOpenIdea(doc.id)}
+    data-reorder-kind="doc"
+    data-reorder-id={doc.id}
+    data-reorder-section="inbox"
+    onpointerdown={(e) => handlePointerDown(e, "doc", doc.id, "inbox")}
+    onclick={() => {
+      if (suppressClick) {
+        suppressClick = false;
+        return;
+      }
+      onOpenIdea(doc.id);
+    }}
     onkeydown={(e) => activateOn(e, () => onOpenIdea(doc.id))}
     role="button"
     tabindex="0"
@@ -531,7 +592,7 @@
   {/if}
 {/snippet}
 
-<aside class="sidebar">
+<aside class="sidebar" class:sidebar--reordering={dragSource !== null}>
   <div class="sidebar-brand">
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="4 17 10 11 4 5" />
@@ -647,12 +708,17 @@
           class:sidebar-folder-header--dragging={dragSource?.id === folder.id}
           class:sidebar-folder-header--drop-before={dropTarget?.id === folder.id && dropTarget.edge === "before"}
           class:sidebar-folder-header--drop-after={dropTarget?.id === folder.id && dropTarget.edge === "after"}
-          draggable={editingFolderId !== folder.id}
-          ondragstart={(e) => handleDragStart(e, "folder", folder.id, "folders")}
-          ondragover={(e) => handleDragOver(e, "folder", folder.id, "folders")}
-          ondrop={(e) => handleDrop(e, "folder", folder.id, "folders")}
-          ondragend={handleDragEnd}
-          onclick={() => toggleFolder(folder.id)}
+          data-reorder-kind="folder"
+          data-reorder-id={folder.id}
+          data-reorder-section="folders"
+          onpointerdown={(e) => handlePointerDown(e, "folder", folder.id, "folders")}
+          onclick={() => {
+            if (suppressClick) {
+              suppressClick = false;
+              return;
+            }
+            toggleFolder(folder.id);
+          }}
           onkeydown={(e) => activateOn(e, () => toggleFolder(folder.id))}
           role="button"
           tabindex="0"

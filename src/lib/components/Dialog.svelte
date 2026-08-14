@@ -12,6 +12,8 @@
     onOverlayClick?: () => void;
     /** Disable dismissal entirely (e.g. MultiplyModal while a run is active). */
     dismissible?: boolean;
+    /** Wider panel for dense forms (Settings). Other dialogs stay at 480px. */
+    wide?: boolean;
     children: import("svelte").Snippet;
     footer?: import("svelte").Snippet;
   }
@@ -22,6 +24,7 @@
     onClose,
     onOverlayClick,
     dismissible = true,
+    wide = false,
     children,
     footer,
   }: Props = $props();
@@ -113,7 +116,7 @@
   >
     <div
       bind:this={panel}
-      class="dialog"
+      class="dialog {wide ? 'dialog--wide' : ''}"
       onclick={(e) => e.stopPropagation()}
       onkeydown={(e) => e.stopPropagation()}
       role="dialog"

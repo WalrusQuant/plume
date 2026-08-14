@@ -252,7 +252,7 @@
   }
 </script>
 
-<Dialog {open} title="Settings" {onClose}>
+<Dialog {open} title="Settings" {onClose} wide>
   <div class="dialog-body">
     <div class="settings-tabs" role="tablist">
       <button
@@ -285,205 +285,232 @@
     </div>
 
     {#if activeTab === "ai"}
-      <form id="settings-form" onsubmit={save}>
-        <label class="dialog-label" for="settings-provider">AI provider</label>
-        <div class="assistant-provider-row" id="settings-provider">
-          <button
-            type="button"
-            class="dialog-type-card {formProvider === 'anthropic' ? 'dialog-type-card--active' : ''}"
-            onclick={() => onProviderChange("anthropic")}
-          >
-            <span class="dialog-type-label">Anthropic</span>
-          </button>
-          <button
-            type="button"
-            class="dialog-type-card {formProvider === 'openrouter' ? 'dialog-type-card--active' : ''}"
-            onclick={() => onProviderChange("openrouter")}
-          >
-            <span class="dialog-type-label">OpenRouter</span>
-          </button>
-        </div>
-
-        <label class="dialog-label" for="settings-model">Model</label>
-        <input
-          id="settings-model"
-          class="dialog-input"
-          type="text"
-          list="model-suggestions"
-          placeholder={DEFAULT_MODELS[formProvider]}
-          bind:value={formModel}
-          autocomplete="off"
-        />
-        <datalist id="model-suggestions">
-          {#each MODEL_SUGGESTIONS[formProvider] as model (model)}
-            <option value={model}></option>
-          {/each}
-        </datalist>
-
-        <label class="dialog-label" for="settings-voice">Voice &amp; tone</label>
-        <textarea
-          id="settings-voice"
-          class="dialog-textarea"
-          rows="4"
-          placeholder="Describe how the AI should write for you — tone, rhythm, words you love or avoid. Applies to chat, inline edits, and idea expansion. Leave blank for neutral."
-          bind:value={formVoice}
-        ></textarea>
-        <p class="assistant-key-note">
-          Your voice is added to every AI request so generated text sounds like you.
-        </p>
-
-        <label class="dialog-label" for="settings-key">API key</label>
-        <input
-          id="settings-key"
-          class="dialog-input"
-          type="password"
-          placeholder={hasSavedKey
-            ? "Key saved — leave blank to keep it"
-            : formProvider === "anthropic"
-              ? "sk-ant-..."
-              : "sk-or-..."}
-          bind:value={keyInput}
-          autocomplete="off"
-        />
-        <p class="assistant-key-status">
-          {hasSavedKey
-            ? "✓ A key is saved for this provider. Fill this in only to replace it."
-            : "No key saved for this provider yet."}
-          {#if hasSavedKey}
-            <button type="button" class="key-remove-btn" onclick={removeKey}>Remove</button>
-          {/if}
-        </p>
-        {#if keyError}
-          <p class="assistant-key-error">{keyError}</p>
-        {/if}
-        <p class="assistant-key-note">
-          {import.meta.env.DEV
-            ? "Dev build: keys are stored in a local file in the app data folder (keychain is skipped to avoid password prompts)."
-            : "Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider."}
-        </p>
-
-        <label class="dialog-label" for="settings-tavily-key">Web search key (Tavily)</label>
-        <input
-          id="settings-tavily-key"
-          class="dialog-input"
-          type="password"
-          placeholder={hasSavedTavilyKey ? "Key saved — leave blank to keep it" : "tvly-..."}
-          bind:value={tavilyKeyInput}
-          autocomplete="off"
-        />
-        <p class="assistant-key-status">
-          {hasSavedTavilyKey
-            ? "✓ A Tavily key is saved. Fill this in only to replace it."
-            : "No Tavily key saved. Add one to let the assistant search the web."}
-          {#if hasSavedTavilyKey}
-            <button type="button" class="key-remove-btn" onclick={removeTavilyKey}>Remove</button>
-          {/if}
-        </p>
-        <p class="assistant-key-note">
-          The assistant searches the web with Tavily when you toggle search on in the chat.
-          Get a free key at app.tavily.com (1,000 searches/month).
-        </p>
-        {#if tavilyKeyError}
-          <p class="assistant-key-error">{tavilyKeyError}</p>
-        {/if}
-      </form>
-    {:else if activeTab === "local"}
-      <div class="local-search-tab">
-        <label class="dialog-label" for="embed-model-select">Search model</label>
-        <select
-          id="embed-model-select"
-          class="dialog-input"
-          value={modelStatus?.activeModelId ?? ""}
-          disabled={modelBusy !== ""}
-          onchange={(e) => switchModel(e.currentTarget.value)}
-        >
-          {#each models as m (m.id)}
-            <option value={m.id}>
-              {m.label} · {m.dim}d · {m.sizeLabel}{m.installed ? " · installed" : ""}
-            </option>
-          {/each}
-        </select>
-        {#if activeModel}
-          <p class="assistant-key-note">{activeModel.note}</p>
-        {/if}
-
-        {#if modelStatus?.installed}
-          <p class="assistant-key-status">
-            ✓ Installed ({formatSize(modelStatus.sizeBytes)}).
+      <form id="settings-form" class="settings-stack" onsubmit={save}>
+        <div class="settings-field">
+          <label class="dialog-label" for="settings-provider">AI provider</label>
+          <div class="assistant-provider-row" id="settings-provider">
             <button
               type="button"
-              class="key-remove-btn"
-              disabled={modelBusy !== ""}
-              onclick={removeModel}
+              class="dialog-type-card {formProvider === 'anthropic' ? 'dialog-type-card--active' : ''}"
+              onclick={() => onProviderChange("anthropic")}
             >
-              {modelBusy === "removing" ? "Removing…" : "Remove"}
+              <span class="dialog-type-label">Anthropic</span>
             </button>
-          </p>
-          <p class="assistant-key-note model-path">{modelStatus.path}</p>
-        {:else}
-          <p class="assistant-key-status">
-            {modelBusy === "switching" ? "Switching…" : "Not installed."}
-          </p>
-          <button
-            type="button"
-            class="dialog-btn dialog-btn--secondary model-download-btn"
-            disabled={modelBusy !== ""}
-            onclick={downloadModel}
-          >
-            {modelBusy === "downloading"
-              ? "Downloading…"
-              : `Download model (${activeModel?.sizeLabel ?? ""})`}
-          </button>
-        {/if}
+            <button
+              type="button"
+              class="dialog-type-card {formProvider === 'openrouter' ? 'dialog-type-card--active' : ''}"
+              onclick={() => onProviderChange("openrouter")}
+            >
+              <span class="dialog-type-label">OpenRouter</span>
+            </button>
+          </div>
+        </div>
 
-        <p class="assistant-key-note">
-          Powers “search your notes” in chat — the model runs entirely on your machine, so
-          your documents never leave it. Changing the model re-indexes all your notes with
-          the new one; removing it frees the disk (already-indexed notes still search, only
-          new edits pause until a model is installed again).
-        </p>
+        <div class="settings-field">
+          <label class="dialog-label" for="settings-model">Model</label>
+          <input
+            id="settings-model"
+            class="dialog-input"
+            type="text"
+            list="model-suggestions"
+            placeholder={DEFAULT_MODELS[formProvider]}
+            bind:value={formModel}
+            autocomplete="off"
+          />
+          <datalist id="model-suggestions">
+            {#each MODEL_SUGGESTIONS[formProvider] as model (model)}
+              <option value={model}></option>
+            {/each}
+          </datalist>
+        </div>
+
+        <div class="settings-field">
+          <label class="dialog-label" for="settings-voice">Voice &amp; tone</label>
+          <textarea
+            id="settings-voice"
+            class="dialog-textarea"
+            rows="4"
+            placeholder="Describe how the AI should write for you — tone, rhythm, words you love or avoid. Applies to chat, inline edits, and idea expansion. Leave blank for neutral."
+            bind:value={formVoice}
+          ></textarea>
+          <p class="settings-help">
+            Your voice is added to every AI request so generated text sounds like you.
+          </p>
+        </div>
+
+        <div class="settings-field">
+          <label class="dialog-label" for="settings-key">API key</label>
+          <input
+            id="settings-key"
+            class="dialog-input"
+            type="password"
+            placeholder={hasSavedKey
+              ? "Key saved — leave blank to keep it"
+              : formProvider === "anthropic"
+                ? "sk-ant-..."
+                : "sk-or-..."}
+            bind:value={keyInput}
+            autocomplete="off"
+          />
+          <div class="settings-meta">
+            <p class="settings-status">
+              {hasSavedKey
+                ? "✓ A key is saved for this provider. Fill this in only to replace it."
+                : "No key saved for this provider yet."}
+              {#if hasSavedKey}
+                <button type="button" class="key-remove-btn" onclick={removeKey}>Remove</button>
+              {/if}
+            </p>
+            {#if keyError}
+              <p class="settings-error">{keyError}</p>
+            {/if}
+            <p class="settings-help">
+              {import.meta.env.DEV
+                ? "Dev build: keys are stored in a local file in the app data folder (keychain is skipped to avoid password prompts)."
+                : "Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider."}
+            </p>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label class="dialog-label" for="settings-tavily-key">Web search key (Tavily)</label>
+          <input
+            id="settings-tavily-key"
+            class="dialog-input"
+            type="password"
+            placeholder={hasSavedTavilyKey ? "Key saved — leave blank to keep it" : "tvly-..."}
+            bind:value={tavilyKeyInput}
+            autocomplete="off"
+          />
+          <div class="settings-meta">
+            <p class="settings-status">
+              {hasSavedTavilyKey
+                ? "✓ A Tavily key is saved. Fill this in only to replace it."
+                : "No Tavily key saved. Add one to let the assistant search the web."}
+              {#if hasSavedTavilyKey}
+                <button type="button" class="key-remove-btn" onclick={removeTavilyKey}>Remove</button>
+              {/if}
+            </p>
+            {#if tavilyKeyError}
+              <p class="settings-error">{tavilyKeyError}</p>
+            {/if}
+            <p class="settings-help">
+              The assistant searches the web with Tavily when you toggle search on in the chat.
+              Get a free key at app.tavily.com (1,000 searches/month).
+            </p>
+          </div>
+        </div>
+      </form>
+    {:else if activeTab === "local"}
+      <div class="settings-stack">
+        <div class="settings-field">
+          <label class="dialog-label" for="embed-model-select">Search model</label>
+          <select
+            id="embed-model-select"
+            class="dialog-input"
+            value={modelStatus?.activeModelId ?? ""}
+            disabled={modelBusy !== ""}
+            onchange={(e) => switchModel(e.currentTarget.value)}
+          >
+            {#each models as m (m.id)}
+              <option value={m.id}>
+                {m.label} · {m.dim}d · {m.sizeLabel}{m.installed ? " · installed" : ""}
+              </option>
+            {/each}
+          </select>
+          {#if activeModel}
+            <p class="settings-help">{activeModel.note}</p>
+          {/if}
+        </div>
+
+        <div class="settings-field">
+          {#if modelStatus?.installed}
+            <p class="settings-status">
+              ✓ Installed ({formatSize(modelStatus.sizeBytes)}).
+              <button
+                type="button"
+                class="key-remove-btn"
+                disabled={modelBusy !== ""}
+                onclick={removeModel}
+              >
+                {modelBusy === "removing" ? "Removing…" : "Remove"}
+              </button>
+            </p>
+            <p class="settings-path">{modelStatus.path}</p>
+          {:else}
+            <p class="settings-status">
+              {modelBusy === "switching" ? "Switching…" : "Not installed."}
+            </p>
+            <button
+              type="button"
+              class="dialog-btn dialog-btn--secondary"
+              disabled={modelBusy !== ""}
+              onclick={downloadModel}
+            >
+              {modelBusy === "downloading"
+                ? "Downloading…"
+                : `Download model (${activeModel?.sizeLabel ?? ""})`}
+            </button>
+          {/if}
+        </div>
+
+        <div class="settings-meta">
+          <p class="settings-help">
+            Powers “search your notes” in chat. The model runs entirely on your machine, so
+            your documents never leave it.
+          </p>
+          <p class="settings-help">
+            Changing the model re-indexes all your notes. Removing it frees the disk —
+            already-indexed notes still search, but new edits pause until a model is
+            installed again.
+          </p>
+        </div>
       </div>
     {:else}
-      <div class="agents-tab">
-        <p class="assistant-key-note">
+      <div class="settings-stack">
+        <p class="settings-help">
           Connect a coding agent to this notebook. It can read and update project
           plans even when Plume is closed. No token — the agent launches the
           local <code>plume-mcp</code> binary over stdio.
         </p>
         {#if mcpStatus}
-          <p class="assistant-key-status">
-            {mcpStatus.installed ? "✓ Agent server is built." : "Agent server not built yet."}
-          </p>
-          <p class="assistant-key-note model-path">{mcpStatus.binaryPath}</p>
-          {#if !mcpStatus.installed}
-            <p class="assistant-key-note">
-              Build it once from the repo:
-              <code>{mcpStatus.buildCommand}</code>
+          <div class="settings-field">
+            <p class="settings-status">
+              {mcpStatus.installed ? "✓ Agent server is built." : "Agent server not built yet."}
             </p>
-          {/if}
+            <p class="settings-path">{mcpStatus.binaryPath}</p>
+            {#if !mcpStatus.installed}
+              <p class="settings-help">
+                Build it once from the repo:
+                <code>{mcpStatus.buildCommand}</code>
+              </p>
+            {/if}
+          </div>
         {/if}
-        <p class="dialog-label">Copy a config</p>
-        <div class="mcp-copy-row">
-          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("cursor")}>
-            {mcpCopied === "cursor" ? "Copied" : "Cursor"}
-          </button>
-          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("claude")}>
-            {mcpCopied === "claude" ? "Copied" : "Claude Code"}
-          </button>
-          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("grok")}>
-            {mcpCopied === "grok" ? "Copied" : "Grok"}
-          </button>
-          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("codex")}>
-            {mcpCopied === "codex" ? "Copied" : "Codex"}
-          </button>
-          <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("vscode")}>
-            {mcpCopied === "vscode" ? "Copied" : "VS Code"}
-          </button>
+        <div class="settings-field">
+          <p class="dialog-label">Copy a config</p>
+          <div class="mcp-copy-row">
+            <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("cursor")}>
+              {mcpCopied === "cursor" ? "Copied" : "Cursor"}
+            </button>
+            <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("claude")}>
+              {mcpCopied === "claude" ? "Copied" : "Claude Code"}
+            </button>
+            <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("grok")}>
+              {mcpCopied === "grok" ? "Copied" : "Grok"}
+            </button>
+            <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("codex")}>
+              {mcpCopied === "codex" ? "Copied" : "Codex"}
+            </button>
+            <button type="button" class="dialog-btn dialog-btn--secondary" onclick={() => copyMcp("vscode")}>
+              {mcpCopied === "vscode" ? "Copied" : "VS Code"}
+            </button>
+          </div>
+          <p class="settings-help">
+            Cursor / Claude Code: paste into MCP settings. Grok and Codex: run the
+            copied command. VS Code: paste into <code>.vscode/mcp.json</code>.
+          </p>
         </div>
-        <p class="assistant-key-note">
-          Cursor / Claude Code: paste into MCP settings. Grok and Codex: run the
-          copied command. VS Code: paste into <code>.vscode/mcp.json</code>.
-        </p>
       </div>
     {/if}
   </div>
@@ -501,6 +528,69 @@
 </Dialog>
 
 <style>
+  .settings-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-field .dialog-label {
+    margin-bottom: 0;
+  }
+
+  .settings-field .dialog-textarea {
+    margin-top: 0;
+    min-height: 104px;
+  }
+
+  .settings-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .settings-help,
+  .settings-status,
+  .settings-error,
+  .settings-path {
+    margin: 0;
+    max-width: none;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+
+  .settings-help {
+    color: var(--text-tertiary);
+  }
+
+  .settings-status {
+    color: var(--text-secondary);
+  }
+
+  .settings-error {
+    color: var(--danger);
+  }
+
+  .settings-path {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-tertiary);
+    word-break: break-all;
+    user-select: text;
+  }
+
+  .settings-help code,
+  .settings-path {
+    font-size: 11.5px;
+  }
+
   .key-remove-btn {
     margin-left: 6px;
     padding: 0;
@@ -521,27 +611,17 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin: 8px 0 12px;
   }
 
-  .model-download-btn {
-    margin-top: 6px;
-  }
-  .model-download-btn:disabled {
+  .settings-field .dialog-btn:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-
-  .model-path {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    word-break: break-all;
-    user-select: text;
   }
 
   .settings-tabs {
     display: flex;
     gap: 4px;
-    margin-bottom: 16px;
+    margin-bottom: 20px;
     border-bottom: 1px solid var(--border);
   }
   .settings-tab {
