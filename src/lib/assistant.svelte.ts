@@ -1,7 +1,8 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { api, type AIProvider, type Chat, type ChatMessage, type DocReference } from "$lib/api";
+import { api, type Chat, type ChatMessage, type ConnectorSpec, type DocReference } from "$lib/api";
 import { toast } from "$lib/toast.svelte";
 import { formatError } from "$lib/formatError";
+import { mergeSettings, type AISettings } from "$lib/aiSettings";
 import {
   OPENROUTER_HISTORY_BUDGET,
   ANTHROPIC_HISTORY_BUDGET,
@@ -11,42 +12,19 @@ import {
   capHistory,
 } from "$lib/chatHistory";
 
+export { DEFAULT_MODELS } from "$lib/aiSettings";
+export type { AISettings } from "$lib/aiSettings";
+
 const SETTINGS_KEY = "markdown-ai-settings";
 
-export const DEFAULT_MODELS: Record<AIProvider, string> = {
-  anthropic: "claude-opus-4-8",
-  openrouter: "anthropic/claude-opus-4.8",
-};
-
-export interface AISettings {
-  provider: AIProvider;
-  model: string;
-  /** Global "Voice & tone" guidance injected into every AI system prompt. */
-  voice: string;
-  /** When on, chat may call the Tavily web_search tool (requires a Tavily key). */
-  webSearch: boolean;
-  /** When on, chat may call the search_notes tool (semantic search over the
-      user's own docs). Needs no key. Off by default so extended thinking stays
-      on unless the user opts into notes search this thread. */
-  searchNotes: boolean;
-}
-
 function loadSettings(): AISettings {
-  const defaults: AISettings = {
-    provider: "anthropic",
-    model: DEFAULT_MODELS.anthropic,
-    voice: "",
-    webSearch: false,
-    searchNotes: false,
-  };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    // merge so blobs saved before `voice` existed still get a defined value
-    if (raw) return { ...defaults, ...JSON.parse(raw) };
+    if (raw) return mergeSettings(JSON.parse(raw));
   } catch {
     /* fall through to defaults */
   }
-  return defaults;
+  return mergeSettings(null);
 }
 
 /** Payloads of the assistant:* events emitted by ai.rs. */
@@ -104,7 +82,28 @@ class AssistantStore {
   /** The context limit the UI should warn against, or null when there's no
       hard one (Anthropic relies on server-side compaction). */
   get contextLimit(): number | null {
-    return this.settings.provider === "openrouter" ? OPENROUTER_HISTORY_BUDGET : null;
+    return this.settings.provider === "anthropic" ? null : OPENROUTER_HISTORY_BUDGET;
+  }
+
+  connectorSpec(): ConnectorSpec {
+    if (this.settings.provider === "custom") {
+      const custom = this.settings.customConnectors.find((c) => c.id === this.settings.customId);
+      return {
+        provider: "custom",
+        customId: this.settings.customId,
+        baseUrl: custom?.baseUrl ?? "",
+      };
+    }
+    return { provider: this.settings.provider };
+  }
+
+  async refreshConfigured() {
+    if (this.settings.provider === "custom") {
+      const custom = this.settings.customConnectors.find((c) => c.id === this.settings.customId);
+      this.isConfigured = Boolean(custom?.baseUrl.trim());
+      return;
+    }
+    this.isConfigured = await api.hasApiKey(this.settings.provider);
   }
 
   private docId: string | null = null;
@@ -141,7 +140,7 @@ class AssistantStore {
   }
 
   async init() {
-    this.isConfigured = await api.hasApiKey(this.settings.provider);
+    await this.refreshConfigured();
     this.hasTavilyKey = await api.hasTavilyKey();
     if (this.listening) return; // re-init (e.g. remount): refresh key status only
     this.listening = true;
@@ -349,11 +348,11 @@ class AssistantStore {
     // has no compaction, so its cap is the real limiter — flag when it bites.
     const snapshot = $state.snapshot(this.messages);
     const capped = capHistory(snapshot, this.historyBudget());
-    this.historyTrimmed = this.settings.provider === "openrouter" && capped.length < snapshot.length;
+    this.historyTrimmed = this.settings.provider !== "anthropic" && capped.length < snapshot.length;
     try {
       await api.sendAssistantMessage(
         this.activeStreamId,
-        this.settings.provider,
+        this.connectorSpec(),
         this.settings.model || null,
         toApiMessages(capped),
         documentContent,
@@ -404,17 +403,28 @@ class AssistantStore {
   async updateSettings(settings: AISettings) {
     this.settings = settings;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-    this.isConfigured = await api.hasApiKey(settings.provider);
+    await this.refreshConfigured();
   }
 
   async saveKey(key: string) {
-    await api.setApiKey(this.settings.provider, key);
-    this.isConfigured = true;
+    if (this.settings.provider === "custom") {
+      const id = this.settings.customId;
+      if (!id) throw new Error("No custom endpoint selected");
+      await api.setCustomApiKey(id, key);
+    } else {
+      await api.setApiKey(this.settings.provider, key);
+    }
+    await this.refreshConfigured();
   }
 
   async removeKey() {
-    await api.deleteApiKey(this.settings.provider);
-    this.isConfigured = false;
+    if (this.settings.provider === "custom") {
+      const id = this.settings.customId;
+      if (id) await api.deleteCustomApiKey(id);
+    } else {
+      await api.deleteApiKey(this.settings.provider);
+    }
+    await this.refreshConfigured();
   }
 
   async saveTavilyKey(key: string) {

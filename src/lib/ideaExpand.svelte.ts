@@ -48,7 +48,7 @@ class IdeaExpandController extends HeadlessStream {
       api
         .sendIdeaExpand(
           streamId,
-          assistant.settings.provider,
+          assistant.connectorSpec(),
           assistant.settings.model || null,
           idea,
           targetLabel,

@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use rusqlite::Connection;
 use tauri::{AppHandle, State};
 
-use crate::ai::{self, AiState, ChatMessage, DocReference, Provider};
+use crate::ai::{self, AiState, ChatMessage, ConnectorSpec, DocReference, Provider};
 use crate::embed::EmbedState;
 use crate::error::{Error, Result};
 use crate::export::{self, ExportOutput, ExportTarget};
@@ -445,6 +445,21 @@ pub fn delete_api_key(app: AppHandle, provider: Provider) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn set_custom_api_key(app: AppHandle, id: String, key: String) -> Result<()> {
+    ai::set_custom_api_key(&app, &id, &key)
+}
+
+#[tauri::command]
+pub fn has_custom_api_key(app: AppHandle, id: String) -> Result<bool> {
+    Ok(ai::get_custom_api_key(&app, &id)?.is_some())
+}
+
+#[tauri::command]
+pub fn delete_custom_api_key(app: AppHandle, id: String) -> Result<()> {
+    ai::delete_custom_api_key(&app, &id)
+}
+
+#[tauri::command]
 pub fn set_tavily_key(app: AppHandle, key: String) -> Result<()> {
     ai::set_tavily_key(&app, &key)
 }
@@ -534,7 +549,7 @@ pub fn send_assistant_message(
     app: AppHandle,
     state: State<AiState>,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
@@ -547,7 +562,7 @@ pub fn send_assistant_message(
         app,
         &state,
         stream_id,
-        provider,
+        connector,
         model,
         messages,
         document_content,
@@ -564,7 +579,7 @@ pub fn send_inline_edit(
     app: AppHandle,
     state: State<AiState>,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     instruction: String,
     selected_text: String,
@@ -575,7 +590,7 @@ pub fn send_inline_edit(
         app,
         &state,
         stream_id,
-        provider,
+        connector,
         model,
         instruction,
         selected_text,
@@ -590,13 +605,13 @@ pub fn send_idea_expand(
     app: AppHandle,
     state: State<AiState>,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     idea: String,
     target_label: String,
     voice: Option<String>,
 ) -> Result<()> {
-    ai::start_expand_stream(app, &state, stream_id, provider, model, idea, target_label, voice)
+    ai::start_expand_stream(app, &state, stream_id, connector, model, idea, target_label, voice)
 }
 
 #[tauri::command]
@@ -605,7 +620,7 @@ pub fn send_content_multiply(
     app: AppHandle,
     state: State<AiState>,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     source_content: String,
     target: DocType,
@@ -616,7 +631,7 @@ pub fn send_content_multiply(
         app,
         &state,
         stream_id,
-        provider,
+        connector,
         model,
         source_content,
         target,

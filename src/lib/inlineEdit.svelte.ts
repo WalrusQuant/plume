@@ -382,7 +382,7 @@ class InlineEditController {
     api
       .sendInlineEdit(
         this.activeStreamId,
-        assistant.settings.provider,
+        assistant.connectorSpec(),
         assistant.settings.model || null,
         instruction,
         selectedText,

@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { api, type AIProvider, type ModelStatus, type EmbedModelInfo } from "$lib/api";
+  import { api, type AIProvider, type CustomConnector, type ModelStatus, type EmbedModelInfo } from "$lib/api";
   import { assistant, DEFAULT_MODELS } from "$lib/assistant.svelte";
+  import { isBuiltinProvider, type BuiltinProvider } from "$lib/aiSettings";
   import { toast } from "$lib/toast.svelte";
   import Dialog from "$lib/components/Dialog.svelte";
 
@@ -11,8 +12,17 @@
 
   let { open, onClose }: Props = $props();
 
-  const MODEL_SUGGESTIONS: Record<AIProvider, string[]> = {
+  const BUILTIN_CARDS: { id: BuiltinProvider; label: string }[] = [
+    { id: "anthropic", label: "Anthropic" },
+    { id: "openai", label: "OpenAI" },
+    { id: "grok", label: "Grok" },
+    { id: "openrouter", label: "OpenRouter" },
+  ];
+
+  const MODEL_SUGGESTIONS: Record<BuiltinProvider, string[]> = {
     anthropic: ["claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+    openai: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+    grok: ["grok-4.6", "grok-4.5", "grok-4.3", "grok-build-0.1"],
     openrouter: [
       "anthropic/claude-opus-4.8",
       "anthropic/claude-sonnet-4.6",
@@ -21,6 +31,9 @@
   };
 
   let formProvider = $state<AIProvider>("anthropic");
+  let formCustomId = $state<string | null>(null);
+  let formConnectors = $state<CustomConnector[]>([]);
+  let removedCustomIds = $state<string[]>([]);
   let formModel = $state("");
   let formVoice = $state("");
   let keyInput = $state("");
@@ -42,6 +55,12 @@
   const activeModel = $derived(
     models.find((m) => m.id === modelStatus?.activeModelId) ?? null,
   );
+  const selectedCustom = $derived(
+    formConnectors.find((c) => c.id === formCustomId) ?? null,
+  );
+  const modelSuggestions = $derived(
+    isBuiltinProvider(formProvider) ? MODEL_SUGGESTIONS[formProvider] : [],
+  );
 
   function formatSize(bytes: number): string {
     return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
@@ -52,6 +71,9 @@
     if (open) {
       activeTab = "ai";
       formProvider = assistant.settings.provider;
+      formCustomId = assistant.settings.customId;
+      formConnectors = assistant.settings.customConnectors.map((c) => ({ ...c }));
+      removedCustomIds = [];
       formModel = assistant.settings.model;
       formVoice = assistant.settings.voice;
       keyInput = "";
@@ -88,6 +110,17 @@
   // key was saved, and the status line wrongly reads "No key saved".
   $effect(() => {
     if (!open) return;
+    if (formProvider === "custom") {
+      const id = formCustomId;
+      if (!id) {
+        hasSavedKey = false;
+        return;
+      }
+      void api.hasCustomApiKey(id).then((has) => {
+        if (formProvider === "custom" && formCustomId === id) hasSavedKey = has;
+      });
+      return;
+    }
     const provider = formProvider;
     void api.hasApiKey(provider).then((has) => {
       if (provider === formProvider) hasSavedKey = has;
@@ -127,13 +160,65 @@
     }
   }
 
-  function onProviderChange(provider: AIProvider) {
+  function fallbackModel(provider: AIProvider, customId: string | null): string {
+    if (provider === "custom") {
+      return formConnectors.find((c) => c.id === customId)?.model ?? "";
+    }
+    return DEFAULT_MODELS[provider];
+  }
+
+  function keyPlaceholder(): string {
+    if (hasSavedKey) return "Key saved — leave blank to keep it";
+    if (formProvider === "anthropic") return "sk-ant-...";
+    if (formProvider === "openai") return "sk-...";
+    if (formProvider === "grok") return "xai-...";
+    if (formProvider === "openrouter") return "sk-or-...";
+    return "Optional — leave blank for local servers";
+  }
+
+  function rememberCustomModel() {
+    if (formProvider !== "custom" || !formCustomId) return;
+    const id = formCustomId;
+    const model = formModel;
+    formConnectors = formConnectors.map((c) => (c.id === id ? { ...c, model } : c));
+  }
+
+  function onProviderChange(provider: BuiltinProvider) {
+    rememberCustomModel();
     formProvider = provider;
+    formCustomId = null;
     formModel = DEFAULT_MODELS[provider];
-    // Drop any key typed for the previous provider so it can't be saved under
-    // the newly selected one. The status line re-checks for the new provider.
     keyInput = "";
     keyError = "";
+  }
+
+  function onSelectCustom(id: string) {
+    rememberCustomModel();
+    formProvider = "custom";
+    formCustomId = id;
+    formModel = formConnectors.find((c) => c.id === id)?.model ?? "";
+    keyInput = "";
+    keyError = "";
+  }
+
+  function addCustom() {
+    const id = crypto.randomUUID();
+    formConnectors = [
+      ...formConnectors,
+      { id, name: "New endpoint", baseUrl: "", model: "" },
+    ];
+    onSelectCustom(id);
+  }
+
+  function removeCustom(id: string) {
+    formConnectors = formConnectors.filter((c) => c.id !== id);
+    if (!removedCustomIds.includes(id)) removedCustomIds = [...removedCustomIds, id];
+    if (formCustomId === id) {
+      formProvider = "anthropic";
+      formCustomId = null;
+      formModel = DEFAULT_MODELS.anthropic;
+      keyInput = "";
+    }
   }
 
   async function save(e: Event) {
@@ -144,16 +229,25 @@
     // assistant.settings, which re-runs the re-seed $effect and would clear the
     // bound key fields mid-save (the writes below would then see empty strings).
     const provider = formProvider;
-    // An empty model would break the next API call — fall back to the default.
-    const model = formModel.trim() || DEFAULT_MODELS[provider];
+    const customId = formCustomId;
+    const connectors = formConnectors.map((c) =>
+      c.id === customId ? { ...c, model: formModel.trim() } : { ...c },
+    );
+    const model = formModel.trim() || fallbackModel(provider, customId);
     const voice = formVoice.trim();
     const newKey = keyInput.trim();
     const newTavilyKey = tavilyKeyInput.trim();
+    const removedIds = [...removedCustomIds];
     try {
+      for (const id of removedIds) {
+        await api.deleteCustomApiKey(id).catch(() => {});
+      }
       // settings first so saveKey() stores under the (possibly changed) provider
       await assistant.updateSettings({
         ...assistant.settings,
         provider,
+        customId,
+        customConnectors: connectors,
         model,
         voice,
       });
@@ -178,7 +272,9 @@
   /** Remove the stored key for the provider currently shown in the form. */
   async function removeKey() {
     try {
-      if (formProvider === assistant.settings.provider) {
+      if (formProvider === "custom") {
+        if (formCustomId) await api.deleteCustomApiKey(formCustomId);
+      } else if (formProvider === assistant.settings.provider) {
         await assistant.removeKey();
       } else {
         await api.deleteApiKey(formProvider);
@@ -287,24 +383,79 @@
     {#if activeTab === "ai"}
       <form id="settings-form" class="settings-stack" onsubmit={save}>
         <div class="settings-field">
-          <label class="dialog-label" for="settings-provider">AI provider</label>
-          <div class="assistant-provider-row" id="settings-provider">
-            <button
-              type="button"
-              class="dialog-type-card {formProvider === 'anthropic' ? 'dialog-type-card--active' : ''}"
-              onclick={() => onProviderChange("anthropic")}
-            >
-              <span class="dialog-type-label">Anthropic</span>
-            </button>
-            <button
-              type="button"
-              class="dialog-type-card {formProvider === 'openrouter' ? 'dialog-type-card--active' : ''}"
-              onclick={() => onProviderChange("openrouter")}
-            >
-              <span class="dialog-type-label">OpenRouter</span>
-            </button>
+          <label class="dialog-label" for="settings-provider">Connector</label>
+          <div class="assistant-provider-row settings-provider-grid" id="settings-provider">
+            {#each BUILTIN_CARDS as card (card.id)}
+              <button
+                type="button"
+                class="dialog-type-card {formProvider === card.id ? 'dialog-type-card--active' : ''}"
+                onclick={() => onProviderChange(card.id)}
+              >
+                <span class="dialog-type-label">{card.label}</span>
+              </button>
+            {/each}
           </div>
         </div>
+
+        <div class="settings-field">
+          <p class="dialog-label" id="settings-custom-label">Your endpoints</p>
+          <div class="settings-custom-row" role="group" aria-labelledby="settings-custom-label">
+            {#each formConnectors as connector (connector.id)}
+              <button
+                type="button"
+                class="dialog-type-card {formProvider === 'custom' && formCustomId === connector.id
+                  ? 'dialog-type-card--active'
+                  : ''}"
+                onclick={() => onSelectCustom(connector.id)}
+              >
+                <span class="dialog-type-label">{connector.name || "Untitled"}</span>
+              </button>
+            {/each}
+            <button type="button" class="dialog-type-card settings-add-endpoint" onclick={addCustom}>
+              <span class="dialog-type-label">+ Add endpoint</span>
+            </button>
+          </div>
+          <p class="settings-help">
+            Custom endpoints speak the OpenAI chat-completions API. Point them at
+            Ollama, Together, a proxy, or any compatible server.
+          </p>
+        </div>
+
+        {#if formProvider === "custom" && selectedCustom}
+          <div class="settings-field">
+            <label class="dialog-label" for="settings-custom-name">Endpoint name</label>
+            <input
+              id="settings-custom-name"
+              class="dialog-input"
+              type="text"
+              bind:value={selectedCustom.name}
+              placeholder="Ollama"
+              autocomplete="off"
+            />
+          </div>
+          <div class="settings-field">
+            <label class="dialog-label" for="settings-custom-url">Base URL</label>
+            <input
+              id="settings-custom-url"
+              class="dialog-input"
+              type="url"
+              bind:value={selectedCustom.baseUrl}
+              placeholder="http://localhost:11434/v1"
+              autocomplete="off"
+            />
+            <p class="settings-help">
+              Use the server’s <code>/v1</code> root. <code>/chat/completions</code> is added if
+              it is missing.
+            </p>
+            <button
+              type="button"
+              class="key-remove-btn"
+              onclick={() => selectedCustom && removeCustom(selectedCustom.id)}
+            >
+              Remove this endpoint
+            </button>
+          </div>
+        {/if}
 
         <div class="settings-field">
           <label class="dialog-label" for="settings-model">Model</label>
@@ -313,12 +464,12 @@
             class="dialog-input"
             type="text"
             list="model-suggestions"
-            placeholder={DEFAULT_MODELS[formProvider]}
+            placeholder={fallbackModel(formProvider, formCustomId) || "model-id"}
             bind:value={formModel}
             autocomplete="off"
           />
           <datalist id="model-suggestions">
-            {#each MODEL_SUGGESTIONS[formProvider] as model (model)}
+            {#each modelSuggestions as model (model)}
               <option value={model}></option>
             {/each}
           </datalist>
@@ -344,11 +495,7 @@
             id="settings-key"
             class="dialog-input"
             type="password"
-            placeholder={hasSavedKey
-              ? "Key saved — leave blank to keep it"
-              : formProvider === "anthropic"
-                ? "sk-ant-..."
-                : "sk-or-..."}
+            placeholder={keyPlaceholder()}
             bind:value={keyInput}
             autocomplete="off"
           />
@@ -365,9 +512,13 @@
               <p class="settings-error">{keyError}</p>
             {/if}
             <p class="settings-help">
-              {import.meta.env.DEV
-                ? "Dev build: keys are stored in a local file in the app data folder (keychain is skipped to avoid password prompts)."
-                : "Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider."}
+              {#if formProvider === "custom"}
+                Optional for local servers that do not require a key.
+              {:else if import.meta.env.DEV}
+                Dev build: keys are stored in a local file in the app data folder (keychain is skipped to avoid password prompts).
+              {:else}
+                Keys are stored in the macOS Keychain — they never leave this machine except to call your AI provider.
+              {/if}
             </p>
           </div>
         </div>
@@ -532,6 +683,24 @@
     display: flex;
     flex-direction: column;
     gap: 24px;
+  }
+
+  .settings-provider-grid {
+    flex-wrap: wrap;
+  }
+
+  .settings-provider-grid :global(.dialog-type-card) {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .settings-custom-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .settings-add-endpoint {
+    border-style: dashed;
   }
 
   .settings-field {

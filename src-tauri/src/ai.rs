@@ -13,6 +13,8 @@ use crate::websearch;
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
+const OPENAI_URL: &str = "https://api.openai.com/v1/chat/completions";
+const GROK_URL: &str = "https://api.x.ai/v1/chat/completions";
 const MAX_TOKENS: u32 = 64_000;
 
 const KEYRING_SERVICE: &str = "com.plumemd.app";
@@ -115,32 +117,93 @@ fn search_notes_tool_openai() -> serde_json::Value {
 #[serde(rename_all = "lowercase")]
 pub enum Provider {
     Anthropic,
+    Openai,
+    Grok,
     Openrouter,
+    Custom,
 }
 
 impl Provider {
-    fn key_name(self) -> &'static str {
+    fn key_name(self) -> Option<&'static str> {
         match self {
-            Provider::Anthropic => "anthropic-api-key",
-            Provider::Openrouter => "openrouter-api-key",
+            Provider::Anthropic => Some("anthropic-api-key"),
+            Provider::Openai => Some("openai-api-key"),
+            Provider::Grok => Some("xai-api-key"),
+            Provider::Openrouter => Some("openrouter-api-key"),
+            Provider::Custom => None,
         }
     }
 
-    /// Defaults verified 2026-06-09 (claude-api skill / OpenRouter catalog).
+    /// Defaults verified 2026-08-13 (claude-api skill / OpenAI catalog / xAI docs).
     fn default_model(self) -> &'static str {
         match self {
             Provider::Anthropic => "claude-opus-4-8",
+            Provider::Openai => "gpt-5.6-sol",
+            Provider::Grok => "grok-4.6",
             Provider::Openrouter => "anthropic/claude-opus-4.8",
+            Provider::Custom => "",
         }
     }
 
     /// Cheaper/faster model for short, scoped jobs like inline edits.
-    /// Verified 2026-06-10 (claude-api skill / OpenRouter catalog).
     fn fast_model(self) -> &'static str {
         match self {
             Provider::Anthropic => "claude-haiku-4-5",
+            Provider::Openai => "gpt-5.6-luna",
+            Provider::Grok => "grok-4.3",
             Provider::Openrouter => "anthropic/claude-haiku-4.5",
+            Provider::Custom => "",
         }
+    }
+
+    fn is_openai_compat(self) -> bool {
+        matches!(
+            self,
+            Provider::Openai | Provider::Grok | Provider::Openrouter | Provider::Custom
+        )
+    }
+}
+
+/// Which connector to call: a built-in, or a named custom endpoint.
+/// `customId` / `baseUrl` are only used when `provider` is `custom`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSpec {
+    pub provider: Provider,
+    #[serde(default)]
+    pub custom_id: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+/// Turn a user-entered custom base into a chat-completions URL.
+pub fn normalize_completions_url(raw: &str) -> Result<String> {
+    let url = raw.trim().trim_end_matches('/');
+    if url.is_empty() {
+        return Err(Error::InvalidInput("custom endpoint needs a base URL".into()));
+    }
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(Error::InvalidInput(
+            "base URL must start with http:// or https://".into(),
+        ));
+    }
+    if lower.ends_with("/chat/completions") {
+        Ok(url.to_string())
+    } else {
+        Ok(format!("{url}/chat/completions"))
+    }
+}
+
+fn completions_url(spec: &ConnectorSpec) -> Result<String> {
+    match spec.provider {
+        Provider::Openai => Ok(OPENAI_URL.to_string()),
+        Provider::Grok => Ok(GROK_URL.to_string()),
+        Provider::Openrouter => Ok(OPENROUTER_URL.to_string()),
+        Provider::Custom => normalize_completions_url(spec.base_url.as_deref().unwrap_or("")),
+        Provider::Anthropic => Err(Error::InvalidInput(
+            "Anthropic does not use the OpenAI-compatible completions URL".into(),
+        )),
     }
 }
 
@@ -273,15 +336,44 @@ fn remove_key(app: &AppHandle, name: &str) -> Result<()> {
 }
 
 pub fn set_api_key(app: &AppHandle, provider: Provider, key: &str) -> Result<()> {
-    store_key(app, provider.key_name(), key)
+    let name = provider
+        .key_name()
+        .ok_or_else(|| Error::InvalidInput("use set_custom_api_key for custom endpoints".into()))?;
+    store_key(app, name, key)
 }
 
 pub fn get_api_key(app: &AppHandle, provider: Provider) -> Result<Option<String>> {
-    read_key(app, provider.key_name())
+    let Some(name) = provider.key_name() else {
+        return Ok(None);
+    };
+    read_key(app, name)
 }
 
 pub fn delete_api_key(app: &AppHandle, provider: Provider) -> Result<()> {
-    remove_key(app, provider.key_name())
+    let name = provider
+        .key_name()
+        .ok_or_else(|| Error::InvalidInput("use delete_custom_api_key for custom endpoints".into()))?;
+    remove_key(app, name)
+}
+
+fn custom_key_name(id: &str) -> Result<String> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(Error::InvalidInput("custom connector id is required".into()));
+    }
+    Ok(format!("custom-api-key:{id}"))
+}
+
+pub fn set_custom_api_key(app: &AppHandle, id: &str, key: &str) -> Result<()> {
+    store_key(app, &custom_key_name(id)?, key)
+}
+
+pub fn get_custom_api_key(app: &AppHandle, id: &str) -> Result<Option<String>> {
+    read_key(app, &custom_key_name(id)?)
+}
+
+pub fn delete_custom_api_key(app: &AppHandle, id: &str) -> Result<()> {
+    remove_key(app, &custom_key_name(id)?)
 }
 
 pub fn set_tavily_key(app: &AppHandle, key: &str) -> Result<()> {
@@ -491,7 +583,7 @@ pub fn start_expand_stream(
     app: AppHandle,
     state: &AiState,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     idea: String,
     target_label: String,
@@ -499,7 +591,7 @@ pub fn start_expand_stream(
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| provider.default_model().to_string());
+        .unwrap_or_else(|| connector.provider.default_model().to_string());
     let system = expand_system_prompt(&idea, &target_label, voice.as_deref());
     let messages = vec![ChatMessage {
         role: "user".into(),
@@ -507,7 +599,7 @@ pub fn start_expand_stream(
         raw_content: None,
     }];
     // one-shot generation — no caching, no compaction (no history)
-    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false, false)
+    run_stream(app, state, stream_id, connector, model, system, messages, false, false, false, false)
 }
 
 /// Adapt a finished document into a platform-native draft of `target`, streaming
@@ -519,7 +611,7 @@ pub fn start_content_multiply_stream(
     app: AppHandle,
     state: &AiState,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     source_content: String,
     target: DocType,
@@ -528,7 +620,7 @@ pub fn start_content_multiply_stream(
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| provider.default_model().to_string());
+        .unwrap_or_else(|| connector.provider.default_model().to_string());
     let system = multiply_system_prompt(&source_content, target, &target_label, voice.as_deref());
     let messages = vec![ChatMessage {
         role: "user".into(),
@@ -536,7 +628,7 @@ pub fn start_content_multiply_stream(
         raw_content: None,
     }];
     // one-shot generation — no caching, no compaction (no history)
-    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false, false)
+    run_stream(app, state, stream_id, connector, model, system, messages, false, false, false, false)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -544,7 +636,7 @@ pub fn start_stream(
     app: AppHandle,
     state: &AiState,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     messages: Vec<ChatMessage>,
     document_content: String,
@@ -555,16 +647,16 @@ pub fn start_stream(
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| provider.default_model().to_string());
+        .unwrap_or_else(|| connector.provider.default_model().to_string());
     let system =
         system_prompt(&document_content, &references, web_search, search_notes, voice.as_deref());
     // chat: the system prefix (instructions + document) is re-sent every turn —
     // cache it so unchanged-document follow-ups read back at ~0.1× input price.
     // Enable server-side compaction so a long master chat stays bounded without
     // hard-dropping context (Anthropic + supported model only).
-    let compact = provider == Provider::Anthropic && supports_compaction(&model);
+    let compact = connector.provider == Provider::Anthropic && supports_compaction(&model);
     run_stream(
-        app, state, stream_id, provider, model, system, messages, true, compact, web_search,
+        app, state, stream_id, connector, model, system, messages, true, compact, web_search,
         search_notes,
     )
 }
@@ -579,7 +671,7 @@ pub fn start_inline_stream(
     app: AppHandle,
     state: &AiState,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: Option<String>,
     instruction: String,
     selected_text: String,
@@ -588,12 +680,12 @@ pub fn start_inline_stream(
 ) -> Result<()> {
     let model = model
         .filter(|m| !m.trim().is_empty())
-        .unwrap_or_else(|| provider.fast_model().to_string());
+        .unwrap_or_else(|| connector.provider.fast_model().to_string());
     let system = inline_system_prompt(&document_content, &selected_text, voice.as_deref());
     let messages =
         vec![ChatMessage { role: "user".into(), content: instruction, raw_content: None }];
     // one-shot edit — don't pay the cache-write premium on a single-use prompt
-    run_stream(app, state, stream_id, provider, model, system, messages, false, false, false, false)
+    run_stream(app, state, stream_id, connector, model, system, messages, false, false, false, false)
 }
 
 /// Shared driver: load the key, abort any in-flight stream, then spawn the
@@ -607,7 +699,7 @@ fn run_stream(
     app: AppHandle,
     state: &AiState,
     stream_id: String,
-    provider: Provider,
+    connector: ConnectorSpec,
     model: String,
     system: String,
     messages: Vec<ChatMessage>,
@@ -616,8 +708,14 @@ fn run_stream(
     web_search: bool,
     search_notes: bool,
 ) -> Result<()> {
-    let Some(api_key) = get_api_key(&app, provider)? else {
-        return Err(Error::InvalidInput("no API key configured".into()));
+    let provider = connector.provider;
+    let api_key = match provider {
+        Provider::Custom => {
+            let id = connector.custom_id.as_deref().unwrap_or("");
+            get_custom_api_key(&app, id)?.unwrap_or_default()
+        }
+        _ => get_api_key(&app, provider)?
+            .ok_or_else(|| Error::InvalidInput("no API key configured".into()))?,
     };
     // When web search is on, the Tavily key is required up front — fail fast with
     // a clear message rather than letting the model call a tool we can't run.
@@ -655,19 +753,25 @@ fn run_stream(
                 )
                 .await
             }
-            Provider::Openrouter => {
-                stream_openrouter(
-                    &task_app,
-                    &task_id,
-                    &api_key,
-                    &model,
-                    messages,
-                    &system,
-                    tavily_key,
-                    search_notes,
-                )
-                .await
-            }
+            compat if compat.is_openai_compat() => match completions_url(&connector) {
+                Ok(url) => {
+                    stream_openai_compat(
+                        &task_app,
+                        &task_id,
+                        &api_key,
+                        &model,
+                        messages,
+                        &system,
+                        tavily_key,
+                        search_notes,
+                        &url,
+                        compat,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            },
+            _ => Err(Error::InvalidInput("unsupported provider".into())),
         };
         if let Err(e) = result {
             let _ = task_app.emit(EVT_ERROR, json!({ "id": task_id, "message": e.to_string() }));
@@ -1311,10 +1415,10 @@ struct OpenRouterRound {
     usage: Usage,
 }
 
-/// OpenRouter chat with the same optional `web_search` tool loop, using the
-/// OpenAI function-calling wire format (`tool_calls` deltas, `role:"tool"`
-/// results). Without `tavily_key` it is a single request — unchanged behavior.
-async fn stream_openrouter(
+/// OpenAI-compatible chat (`/chat/completions`) with the same optional
+/// `web_search` tool loop, using the OpenAI function-calling wire format.
+/// Used by OpenRouter, OpenAI, Grok, and named custom endpoints.
+async fn stream_openai_compat(
     app: &AppHandle,
     stream_id: &str,
     api_key: &str,
@@ -1323,6 +1427,8 @@ async fn stream_openrouter(
     system: &str,
     tavily_key: Option<String>,
     search_notes: bool,
+    url: &str,
+    provider: Provider,
 ) -> Result<()> {
     let web_search = tavily_key.is_some();
     let mut convo: Vec<serde_json::Value> = vec![json!({ "role": "system", "content": system })];
@@ -1361,13 +1467,18 @@ async fn stream_openrouter(
             body["tools"] = json!(tools);
             body["tool_choice"] = json!("auto");
         }
-        let request = client
-            .post(OPENROUTER_URL)
-            .header("authorization", format!("Bearer {api_key}"))
+        let mut request = client
+            .post(url)
             .header("content-type", "application/json")
-            .header("http-referer", "https://github.com/WalrusQuant/plume")
-            .header("x-title", "Plume")
             .json(&body);
+        if !api_key.is_empty() {
+            request = request.header("authorization", format!("Bearer {api_key}"));
+        }
+        if provider == Provider::Openrouter {
+            request = request
+                .header("http-referer", "https://github.com/WalrusQuant/plume")
+                .header("x-title", "Plume");
+        }
 
         let round = stream_openrouter_round(app, stream_id, request).await?;
         usage.update(round.usage.input, round.usage.output);
@@ -1646,13 +1757,76 @@ mod tests {
     fn fast_model_is_haiku_tier() {
         assert_eq!(Provider::Anthropic.fast_model(), "claude-haiku-4-5");
         assert_eq!(Provider::Openrouter.fast_model(), "anthropic/claude-haiku-4.5");
+        assert_eq!(Provider::Openai.fast_model(), "gpt-5.6-luna");
+        assert_eq!(Provider::Grok.fast_model(), "grok-4.3");
     }
 
     #[test]
     fn fast_model_differs_from_default() {
-        for provider in [Provider::Anthropic, Provider::Openrouter] {
+        for provider in [Provider::Anthropic, Provider::Openai, Provider::Grok, Provider::Openrouter]
+        {
             assert_ne!(provider.fast_model(), provider.default_model());
         }
+    }
+
+    #[test]
+    fn builtin_key_slots() {
+        assert_eq!(Provider::Anthropic.key_name(), Some("anthropic-api-key"));
+        assert_eq!(Provider::Openai.key_name(), Some("openai-api-key"));
+        assert_eq!(Provider::Grok.key_name(), Some("xai-api-key"));
+        assert_eq!(Provider::Openrouter.key_name(), Some("openrouter-api-key"));
+        assert_eq!(Provider::Custom.key_name(), None);
+    }
+
+    #[test]
+    fn custom_key_slots_do_not_collide() {
+        assert_eq!(custom_key_name("aaa").unwrap(), "custom-api-key:aaa");
+        assert_eq!(custom_key_name("bbb").unwrap(), "custom-api-key:bbb");
+        assert!(custom_key_name("").is_err());
+        assert!(custom_key_name("   ").is_err());
+    }
+
+    #[test]
+    fn normalize_custom_completions_url() {
+        assert_eq!(
+            normalize_completions_url("http://localhost:11434/v1").unwrap(),
+            "http://localhost:11434/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_completions_url("https://api.together.xyz/v1/").unwrap(),
+            "https://api.together.xyz/v1/chat/completions"
+        );
+        assert_eq!(
+            normalize_completions_url("https://proxy.example/v1/chat/completions").unwrap(),
+            "https://proxy.example/v1/chat/completions"
+        );
+        assert!(normalize_completions_url("").is_err());
+        assert!(normalize_completions_url("ftp://nope").is_err());
+        assert!(normalize_completions_url("localhost:11434").is_err());
+    }
+
+    #[test]
+    fn completions_url_for_builtins() {
+        let openai = ConnectorSpec {
+            provider: Provider::Openai,
+            custom_id: None,
+            base_url: None,
+        };
+        assert_eq!(completions_url(&openai).unwrap(), OPENAI_URL);
+        let grok = ConnectorSpec { provider: Provider::Grok, custom_id: None, base_url: None };
+        assert_eq!(completions_url(&grok).unwrap(), GROK_URL);
+        let custom = ConnectorSpec {
+            provider: Provider::Custom,
+            custom_id: Some("x".into()),
+            base_url: Some("http://127.0.0.1:1234/v1".into()),
+        };
+        assert_eq!(
+            completions_url(&custom).unwrap(),
+            "http://127.0.0.1:1234/v1/chat/completions"
+        );
+        let anthropic =
+            ConnectorSpec { provider: Provider::Anthropic, custom_id: None, base_url: None };
+        assert!(completions_url(&anthropic).is_err());
     }
 
     #[test]

@@ -1,4 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { AIProvider } from "./aiSettings";
+
+export type { AIProvider, CustomConnector } from "./aiSettings";
 
 export type DocType =
   | "blog-post"
@@ -75,7 +78,11 @@ export interface Chat {
   updatedAt: string;
 }
 
-export type AIProvider = "anthropic" | "openrouter";
+export interface ConnectorSpec {
+  provider: AIProvider;
+  customId?: string | null;
+  baseUrl?: string | null;
+}
 
 export type SnapshotCause = "ai-edit" | "interval" | "manual" | "restore";
 
@@ -193,6 +200,10 @@ export const api = {
     invoke<void>("set_api_key", { provider, key }),
   hasApiKey: (provider: AIProvider) => invoke<boolean>("has_api_key", { provider }),
   deleteApiKey: (provider: AIProvider) => invoke<void>("delete_api_key", { provider }),
+  setCustomApiKey: (id: string, key: string) =>
+    invoke<void>("set_custom_api_key", { id, key }),
+  hasCustomApiKey: (id: string) => invoke<boolean>("has_custom_api_key", { id }),
+  deleteCustomApiKey: (id: string) => invoke<void>("delete_custom_api_key", { id }),
 
   /** Tavily web-search key — BYOK, stored like the provider keys (keychain in
       release, dev-keys file in debug). Not tied to a provider. */
@@ -218,7 +229,7 @@ export const api = {
 
   sendAssistantMessage: (
     streamId: string,
-    provider: AIProvider,
+    connector: ConnectorSpec,
     model: string | null,
     messages: ChatMessage[],
     documentContent: string,
@@ -229,7 +240,7 @@ export const api = {
   ) =>
     invoke<void>("send_assistant_message", {
       streamId,
-      provider,
+      connector,
       model,
       messages,
       documentContent,
@@ -240,7 +251,7 @@ export const api = {
     }),
   sendInlineEdit: (
     streamId: string,
-    provider: AIProvider,
+    connector: ConnectorSpec,
     model: string | null,
     instruction: string,
     selectedText: string,
@@ -249,7 +260,7 @@ export const api = {
   ) =>
     invoke<void>("send_inline_edit", {
       streamId,
-      provider,
+      connector,
       model,
       instruction,
       selectedText,
@@ -258,16 +269,16 @@ export const api = {
     }),
   sendIdeaExpand: (
     streamId: string,
-    provider: AIProvider,
+    connector: ConnectorSpec,
     model: string | null,
     idea: string,
     targetLabel: string,
     voice: string | null,
   ) =>
-    invoke<void>("send_idea_expand", { streamId, provider, model, idea, targetLabel, voice }),
+    invoke<void>("send_idea_expand", { streamId, connector, model, idea, targetLabel, voice }),
   sendContentMultiply: (
     streamId: string,
-    provider: AIProvider,
+    connector: ConnectorSpec,
     model: string | null,
     sourceContent: string,
     target: DocType,
@@ -276,7 +287,7 @@ export const api = {
   ) =>
     invoke<void>("send_content_multiply", {
       streamId,
-      provider,
+      connector,
       model,
       sourceContent,
       target,

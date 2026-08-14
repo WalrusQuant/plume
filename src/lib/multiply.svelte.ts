@@ -43,7 +43,7 @@ class MultiplyController extends HeadlessStream {
       api
         .sendContentMultiply(
           streamId,
-          assistant.settings.provider,
+          assistant.connectorSpec(),
           assistant.settings.model || null,
           sourceContent,
           target,
