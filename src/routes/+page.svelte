@@ -42,6 +42,9 @@
   const SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
   const THEME_KEY = "markdown-theme";
   const FOCUS_KEY = "markdown-focus-mode";
+  const RIGHT_PANE_KEY = "markdown-right-pane-ratio";
+  const RIGHT_PANE_MAX = 0.5;
+  const RIGHT_PANE_MIN_PX = 260;
   // First-run guard: seed the welcome doc once, never again (even if deleted).
   const WELCOME_SEEDED_KEY = "markdown-welcome-seeded";
 
@@ -60,6 +63,11 @@
   /** Focus mode: hide the right pane (preview/assistant/history) for a
       distraction-free, full-width editor. Persisted across sessions. */
   let focusMode = $state(false);
+  /** Share of the editor+preview row given to the right pane. Capped at 50%;
+      can go narrower. Persisted. */
+  let rightPaneRatio = $state(RIGHT_PANE_MAX);
+  let rightPaneResizing = $state(false);
+  let editorContainerEl: HTMLDivElement | null = $state(null);
   let dialogOpen = $state(false);
   /** Type pre-selected in the new-document dialog (e.g. "plan" from the shelf). */
   let dialogInitialType = $state<DocType>("generic");
@@ -793,10 +801,75 @@
     if (!focusMode) schedulePreview(content);
   }
 
+  function clampRightPaneRatio(ratio: number, containerWidth: number): number {
+    if (containerWidth <= 0) return RIGHT_PANE_MAX;
+    const minRatio = Math.min(RIGHT_PANE_MAX, RIGHT_PANE_MIN_PX / containerWidth);
+    return Math.min(RIGHT_PANE_MAX, Math.max(minRatio, ratio));
+  }
+
+  function applyRightPaneFromX(clientX: number) {
+    const width = editorContainerEl?.getBoundingClientRect().width ?? 0;
+    const left = editorContainerEl?.getBoundingClientRect().left ?? 0;
+    const fromRight = left + width - clientX;
+    rightPaneRatio = clampRightPaneRatio(fromRight / width, width);
+  }
+
+  function persistRightPaneRatio() {
+    localStorage.setItem(RIGHT_PANE_KEY, String(rightPaneRatio));
+  }
+
+  function startRightPaneResize(e: PointerEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    rightPaneResizing = true;
+    applyRightPaneFromX(e.clientX);
+
+    const onMove = (ev: PointerEvent) => {
+      ev.preventDefault();
+      applyRightPaneFromX(ev.clientX);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+      rightPaneResizing = false;
+      persistRightPaneRatio();
+    };
+    window.addEventListener("pointermove", onMove, { passive: false });
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }
+
+  function onRightPaneResizeKey(e: KeyboardEvent) {
+    const width = editorContainerEl?.getBoundingClientRect().width ?? 0;
+    const step = e.shiftKey ? 0.08 : 0.03;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      rightPaneRatio = clampRightPaneRatio(rightPaneRatio + step, width);
+      persistRightPaneRatio();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      rightPaneRatio = clampRightPaneRatio(rightPaneRatio - step, width);
+      persistRightPaneRatio();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      rightPaneRatio = clampRightPaneRatio(0, width);
+      persistRightPaneRatio();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      rightPaneRatio = RIGHT_PANE_MAX;
+      persistRightPaneRatio();
+    }
+  }
+
   // ----- boot -----
 
   onMount(() => {
     focusMode = localStorage.getItem(FOCUS_KEY) === "1";
+    const storedRatio = Number(localStorage.getItem(RIGHT_PANE_KEY));
+    if (Number.isFinite(storedRatio) && storedRatio > 0) {
+      rightPaneRatio = Math.min(RIGHT_PANE_MAX, storedRatio);
+    }
     const stored = localStorage.getItem(THEME_KEY);
     const resolved =
       stored === "light" || stored === "dark"
@@ -985,7 +1058,12 @@
         onOpenSettings={() => (settingsOpen = true)}
       />
       <Toolbar {editorView} />
-      <div class="editor-container {focusMode ? 'editor-container--focus' : ''}">
+      <div
+        class="editor-container {focusMode ? 'editor-container--focus' : ''}"
+        class:editor-container--resizing={rightPaneResizing}
+        bind:this={editorContainerEl}
+        style={!focusMode ? `--right-pane-width: ${(rightPaneRatio * 100).toFixed(2)}%` : undefined}
+      >
         <div class="editor-pane">
           {#if docLoading}
             <div class="pane-loading"><div class="loading-spinner"></div></div>
@@ -1002,6 +1080,15 @@
         </div>
         {#if !focusMode}
         <div class="preview-pane">
+          <button
+            type="button"
+            class="pane-resize-handle"
+            class:pane-resize-handle--dragging={rightPaneResizing}
+            aria-label="Resize assistant panel"
+            title="Drag to resize"
+            onpointerdown={startRightPaneResize}
+            onkeydown={onRightPaneResizeKey}
+          ></button>
           <RightPaneTabs activeTab={rightTab} onTabChange={changeRightTab} />
           {#if rightTab === "preview"}
             <div id="right-panel-preview" role="tabpanel" aria-labelledby="right-tab-preview" class="preview-panel-body">
