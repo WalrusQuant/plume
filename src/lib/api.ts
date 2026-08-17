@@ -147,6 +147,7 @@ export const api = {
   moveDocument: (id: string, folderId: string | null) =>
     invoke<Document>("move_document", { id, folderId }),
   deleteDocument: (id: string) => invoke<void>("delete_document", { id }),
+  clearIdeas: () => invoke<number>("clear_ideas"),
   getDocumentContent: (id: string) =>
     invoke<string>("get_document_content", { id }),
   saveDocumentContent: (id: string, content: string) =>
@@ -298,5 +299,10 @@ export const api = {
     }),
   stopAssistant: () => invoke<void>("stop_assistant"),
   mcpStatus: () =>
-    invoke<{ binaryPath: string; installed: boolean; buildCommand: string }>("mcp_status"),
+    invoke<{
+      binaryPath: string;
+      installed: boolean;
+      buildCommand: string;
+      notebookPath: string;
+    }>("mcp_status"),
 };

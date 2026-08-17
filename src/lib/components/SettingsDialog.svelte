@@ -44,9 +44,12 @@
   let tavilyKeyInput = $state("");
   let hasSavedTavilyKey = $state(false);
   let activeTab = $state<"ai" | "local" | "agents">("ai");
-  let mcpStatus = $state<{ binaryPath: string; installed: boolean; buildCommand: string } | null>(
-    null,
-  );
+  let mcpStatus = $state<{
+    binaryPath: string;
+    installed: boolean;
+    buildCommand: string;
+    notebookPath: string;
+  } | null>(null);
   let mcpCopied = $state("");
   let modelStatus = $state<ModelStatus | null>(null);
   let models = $state<EmbedModelInfo[]>([]);
@@ -677,6 +680,8 @@
               {mcpStatus.installed ? "✓ Agent server is built." : "Agent server not built yet."}
             </p>
             <p class="settings-path">{mcpStatus.binaryPath}</p>
+            <p class="settings-help">Notebook</p>
+            <p class="settings-path">{mcpStatus.notebookPath}</p>
             {#if !mcpStatus.installed}
               <p class="settings-help">
                 Build it once from the repo:

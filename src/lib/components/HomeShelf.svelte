@@ -16,6 +16,7 @@
     onNewPage: (folderId: string | null) => void;
     onNewPlan: () => void;
     onNewIdea: () => void;
+    onClearIdeas: () => void;
     onImport: () => void;
     onToggleActive: (id: string, active: boolean) => void;
     /** Whether an AI provider key is set — drives the first-run setup nudge. */
@@ -35,6 +36,7 @@
     onNewPage,
     onNewPlan,
     onNewIdea,
+    onClearIdeas,
     onImport,
     onToggleActive,
     isConfigured,
@@ -405,7 +407,12 @@
 
       <div class="shelf-columns">
         <section class="shelf-col">
-          <h2 class="shelf-section-title">Ideas</h2>
+          <div class="shelf-section-head">
+            <h2 class="shelf-section-title">Ideas</h2>
+            {#if tree.ideas.length > 0}
+              <button class="shelf-clear-btn" onclick={onClearIdeas}>Clear</button>
+            {/if}
+          </div>
           {#each inbox as idea (idea.id)}
             {@render listRow(idea, onOpenIdea)}
           {/each}

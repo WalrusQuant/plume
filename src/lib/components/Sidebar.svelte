@@ -20,6 +20,7 @@
     onNewDocument: () => void;
     onImport: () => void;
     onNewIdea: () => void;
+    onClearIdeas: () => void;
     onOpenIdea: (id: string) => void;
     onOpenSource: (id: string) => void;
     onRemoveSource: (id: string) => void;
@@ -47,6 +48,7 @@
     onNewDocument,
     onImport,
     onNewIdea,
+    onClearIdeas,
     onOpenIdea,
     onOpenSource,
     onRemoveSource,
@@ -691,6 +693,11 @@
   <div class="sidebar-section-header">
     <span class="sidebar-section-label">Ideas</span>
     <div class="sidebar-section-actions">
+      {#if tree.ideas.length > 0}
+        <button class="sidebar-clear-btn" onclick={onClearIdeas} title="Clear inbox">
+          Clear
+        </button>
+      {/if}
       <button class="sidebar-new-btn" onclick={onNewIdea} title="New idea">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <line x1="12" y1="5" x2="12" y2="19" />

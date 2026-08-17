@@ -23,7 +23,7 @@ pub fn resolve_db_path(args: impl IntoIterator<Item = String>) -> Result<PathBuf
             return Ok(PathBuf::from(path));
         }
     }
-    Ok(plume_core::default_db_path())
+    Ok(plume_core::resolve_notebook_db_path())
 }
 
 pub fn usage() -> &'static str {

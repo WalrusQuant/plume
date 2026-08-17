@@ -691,13 +691,41 @@ button:focus-visible {
   gap: 2px;
 }
 
+.shelf-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 6px;
+}
+
 .shelf-section-title {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-tertiary);
+  margin: 0;
   padding: 0 8px 6px;
+}
+
+.shelf-section-head .shelf-section-title {
+  padding: 0;
+}
+
+.shelf-clear-btn {
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.shelf-clear-btn:hover {
+  color: var(--danger);
 }
 
 .shelf-list-row {
@@ -932,6 +960,21 @@ button:focus-visible {
 .sidebar-new-btn:hover {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+.sidebar-clear-btn {
+  padding: 2px 6px;
+  border: none;
+  background: none;
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-clear-btn:hover {
+  color: var(--danger);
 }
 
 /* Document list */

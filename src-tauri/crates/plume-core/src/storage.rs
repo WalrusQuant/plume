@@ -548,6 +548,22 @@ pub fn delete_document(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Wipe the Ideas inbox. Other document types are untouched. Returns how many
+/// rows were removed (0 if the inbox was already empty).
+pub fn delete_all_ideas(conn: &Connection) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM documents_fts WHERE id IN (SELECT id FROM documents WHERE type = ?1)",
+        [DocType::Idea.as_str()],
+    )?;
+    let n = tx.execute(
+        "DELETE FROM documents WHERE type = ?1",
+        [DocType::Idea.as_str()],
+    )?;
+    tx.commit()?;
+    Ok(n)
+}
+
 pub fn get_document_content(conn: &Connection, id: &str) -> Result<String> {
     conn.query_row("SELECT content FROM documents WHERE id = ?1", [id], |row| {
         row.get(0)
@@ -1302,6 +1318,19 @@ mod tests {
         assert_eq!(list_documents(&conn).unwrap().len(), 1);
         delete_document(&conn, &doc.id).unwrap();
         assert!(list_documents(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_all_ideas_leaves_other_docs() {
+        let conn = test_conn();
+        create_document(&conn, "Keep", Some(DocType::Generic), Some("body")).unwrap();
+        create_document(&conn, "Spark", Some(DocType::Idea), Some("thought")).unwrap();
+        create_document(&conn, "Another", Some(DocType::Idea), Some("x")).unwrap();
+        assert_eq!(delete_all_ideas(&conn).unwrap(), 2);
+        let left = list_documents(&conn).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].name, "Keep");
+        assert_eq!(delete_all_ideas(&conn).unwrap(), 0);
     }
 
     #[test]

@@ -85,6 +85,11 @@ pub fn delete_document(db: State<Db>, id: String) -> Result<()> {
 }
 
 #[tauri::command]
+pub fn clear_ideas(db: State<Db>) -> Result<usize> {
+    db.with(storage::delete_all_ideas)
+}
+
+#[tauri::command]
 pub fn get_document_content(db: State<Db>, id: String) -> Result<String> {
     db.with(|conn| storage::get_document_content(conn, &id))
 }
@@ -661,6 +666,7 @@ pub struct McpStatus {
     pub binary_path: String,
     pub installed: bool,
     pub build_command: String,
+    pub notebook_path: String,
 }
 
 /// Locate the stdio MCP binary: next to this app if bundled, else the
@@ -672,6 +678,7 @@ pub fn mcp_status() -> McpStatus {
         installed: path.is_file(),
         binary_path: path.display().to_string(),
         build_command: "cargo build -p plume-mcp --release".into(),
+        notebook_path: plume_core::resolve_notebook_db_path().display().to_string(),
     }
 }
 

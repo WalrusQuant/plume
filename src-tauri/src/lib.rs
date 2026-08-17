@@ -24,14 +24,16 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             // Identifier changed to com.plumemd.app; copy the old notebook
-            // once if this is the first launch under the new id.
+            // once if this is the first launch under the new id. If a stub
+            // already exists at the new path, open the living notebook
+            // (usually the pre-rebrand folder) instead of the empty one.
             let _ = plume_core::migrate_legacy_data_dir(&data_dir);
-            let db_path = data_dir.join("markdown.db");
+            let db_path = plume_core::resolve_notebook_db_path();
             // Safety net: snapshot the DB before migrations can touch it. If a
             // future migration half-applies, the user can roll back by hand.
             // Cheap for the small DBs this app produces; skipped on first run.
             if db_path.exists() {
-                let bak = data_dir.join("markdown.db.bak");
+                let bak = db_path.with_file_name("markdown.db.bak");
                 let _ = std::fs::copy(&db_path, &bak);
             }
             let conn = Connection::open(&db_path)?;
@@ -71,6 +73,7 @@ pub fn run() {
             commands::update_document_type,
             commands::move_document,
             commands::delete_document,
+            commands::clear_ideas,
             commands::get_document_content,
             commands::save_document_content,
             commands::search_documents,

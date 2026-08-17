@@ -34,10 +34,14 @@
   import { aiBusy } from "$lib/aiBusy.svelte";
   import { toast } from "$lib/toast.svelte";
   import { formatError } from "$lib/formatError";
+  import { catalogSignature } from "$lib/catalogSignature";
   import type { SnapshotMeta } from "$lib/api";
 
   const SAVE_DEBOUNCE_MS = 500;
   const PREVIEW_DEBOUNCE_MS = 150;
+  /** How often to re-read the notebook catalog so MCP/agent writes appear
+      without a restart. Cheap: two list queries, skipped when unchanged. */
+  const CATALOG_POLL_MS = 4000;
   /** How often active editing produces an automatic version snapshot. */
   const SNAPSHOT_INTERVAL_MS = 10 * 60 * 1000;
   const THEME_KEY = "markdown-theme";
@@ -704,12 +708,59 @@
     documents = documents.map((d) => (d.id === id ? updated : d));
   }
 
+  /** True while an optimistic sidebar reorder hasn't landed. Catalog refresh
+      must not clobber the local sortOrder with the still-old DB values. */
+  let reorderInFlight = false;
+  let catalogSeq = 0;
+
+  /** Re-read documents + folders from SQLite. MCP (and any other process)
+      writes the same file; the in-memory tree only updates if we fetch. */
+  async function refreshCatalog() {
+    if (loading || reorderInFlight) return;
+    const seq = ++catalogSeq;
+    try {
+      const [nextDocs, nextFolders] = await Promise.all([
+        api.listDocuments(),
+        api.listFolders(),
+      ]);
+      if (seq !== catalogSeq || reorderInFlight) return;
+      if (catalogSignature(documents, folders) === catalogSignature(nextDocs, nextFolders)) {
+        return;
+      }
+      const openId = selectedDocId;
+      const viewing = viewedSource;
+      const selectedGone =
+        openId !== null && !nextDocs.some((d) => d.id === openId);
+      const viewedGone =
+        viewing !== null && !nextDocs.some((d) => d.id === viewing.id);
+      documents = nextDocs;
+      folders = nextFolders;
+      if (viewedGone) {
+        sourceViewerOpen = false;
+        viewedSource = null;
+      }
+      if (selectedGone && openId) {
+        pendingSaves.delete(openId);
+        lastSnapshotAt.delete(openId);
+        docLoadSeq++;
+        docLoading = false;
+        editorView = null;
+        selectedDocId = null;
+        content = "";
+        void assistant.loadFor(null);
+      }
+    } catch {
+      // Background sync — the next focus/poll retries. Don't toast.
+    }
+  }
+
   /** Persist a manual reorder of one sidebar section. Optimistic: stamp each
       id's new sortOrder (the global `documents` array stays recency-ordered;
       buildSidebarTree re-sorts each section), roll back on failure. */
   async function reorderDocuments(ids: string[]) {
     const prev = documents;
     const orderOf = new Map(ids.map((id, i) => [id, i]));
+    reorderInFlight = true;
     documents = documents.map((d) =>
       orderOf.has(d.id) ? { ...d, sortOrder: orderOf.get(d.id)! } : d,
     );
@@ -718,6 +769,8 @@
     } catch (e) {
       documents = prev; // restore previous order; run() surfaces the toast
       throw e;
+    } finally {
+      reorderInFlight = false;
     }
   }
 
@@ -726,6 +779,7 @@
   async function reorderFolders(ids: string[]) {
     const prev = folders;
     const byId = new Map(folders.map((f) => [f.id, f]));
+    reorderInFlight = true;
     folders = ids
       .map((id, i) => {
         const f = byId.get(id);
@@ -737,7 +791,35 @@
     } catch (e) {
       folders = prev;
       throw e;
+    } finally {
+      reorderInFlight = false;
     }
+  }
+
+  async function clearIdeas() {
+    const ideas = documents.filter((d) => d.type === "idea");
+    if (ideas.length === 0) return;
+    const ok = await confirm(
+      ideas.length === 1
+        ? "Delete the 1 idea in the inbox?"
+        : `Delete all ${ideas.length} ideas in the inbox?`,
+      { kind: "warning" },
+    );
+    if (!ok) return;
+    const deleted = await api.clearIdeas();
+    const gone = new Set(ideas.map((d) => d.id));
+    for (const id of gone) {
+      pendingSaves.delete(id);
+      lastSnapshotAt.delete(id);
+    }
+    documents = documents.filter((d) => d.type !== "idea");
+    if (ideaModalId && gone.has(ideaModalId)) ideaModalOpen = false;
+    if (expandingId && gone.has(expandingId)) {
+      expandingId = null;
+      expandingLabel = "";
+      cancelExpand();
+    }
+    toast.show(deleted === 1 ? "Deleted 1 idea" : `Deleted ${deleted} ideas`, "info");
   }
 
   async function deleteDocument(id: string) {
@@ -911,6 +993,16 @@
       loading = false;
     })();
 
+    const appWindow = getCurrentWindow();
+
+    // MCP (and any other process) writes the same SQLite file. Re-read the
+    // catalog on focus and on a quiet poll so new files appear in the tree.
+    let focusUnlisten: (() => void) | null = null;
+    void appWindow.onFocusChanged(({ payload: focused }) => {
+      if (focused) void refreshCatalog();
+    }).then((un) => (focusUnlisten = un));
+    const catalogTimer = setInterval(() => void refreshCatalog(), CATALOG_POLL_MS);
+
     // Drop files anywhere on the window to import them. dragDropEnabled is on in
     // tauri.conf; the webview delivers enter/over/drop/leave with absolute paths.
     let dragUnlisten: (() => void) | null = null;
@@ -956,7 +1048,6 @@
     // then destroy the window (destroy skips the close-requested cycle).
     let closeUnlisten: (() => void) | null = null;
     let closing = false;
-    const appWindow = getCurrentWindow();
     void appWindow
       .onCloseRequested(async (event) => {
         if (closing) return;
@@ -973,6 +1064,8 @@
     return () => {
       window.removeEventListener("beforeunload", flush);
       window.removeEventListener("keydown", onSettingsKey);
+      clearInterval(catalogTimer);
+      focusUnlisten?.();
       closeUnlisten?.();
       dragUnlisten?.();
       void flushSave();
@@ -1000,6 +1093,7 @@
     onOpenSource={openSource}
     onRemoveSource={(id) => void removeSource(id)}
     onNewIdea={newIdea}
+    onClearIdeas={() => run(clearIdeas(), "Clear inbox")}
     onOpenIdea={(id) => run(openIdea(id), "Opening idea")}
     onExpandIdea={(id, type, label) => run(expandIdea(id, type, label), "Expand idea")}
     onCancelExpand={cancelExpand}
@@ -1169,6 +1263,7 @@
         onNewPage={(folderId) => openNewDocument("generic", folderId)}
         onNewPlan={() => openNewDocument("plan")}
         onNewIdea={newIdea}
+        onClearIdeas={() => run(clearIdeas(), "Clear inbox")}
         onImport={() => void pickAndImport()}
         onToggleActive={(id, active) => run(toggleFolderActive(id, active), "Update project")}
         isConfigured={assistant.isConfigured}
