@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Plume — a local-first AI notebook</title>
-<meta name="description" content="A local-first AI notebook for Apple Silicon Macs. Write in markdown, search your notes on this machine, and let a coding agent plan in the same notebook. $50, one-time." />
+<meta name="description" content="A local-first AI notebook. Write in markdown, search your own notes on-device, and connect a coding agent over MCP so it plans in the same notebook. Everything stays on your machine." />
 <link rel="icon" href="favicon.png" type="image/png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -99,12 +99,6 @@
     color: var(--text-primary);
   }
   .nav-links .ghost:hover { border-color: var(--accent); background: var(--accent-surface); }
-  .nav-links .buy {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: #fff;
-  }
-  .nav-links .buy:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
 
   .hero {
     display: block;
@@ -326,39 +320,9 @@
       var(--surface);
   }
   .closing h2 { font-size: clamp(1.8rem, 3.6vw, 2.5rem); letter-spacing: -0.03em; margin-bottom: 12px; }
-  .closing p { color: var(--text-secondary); max-width: 48ch; margin: 0 auto 22px; font-weight: 300; }
+  .closing p { color: var(--text-secondary); max-width: 48ch; margin: 0 auto 26px; font-weight: 300; }
   .closing .cta-row { justify-content: center; }
-  .price {
-    display: flex;
-    align-items: baseline;
-    justify-content: center;
-    gap: 10px;
-    margin: 0 auto 18px;
-  }
-  .price-amt {
-    font-family: var(--font-display);
-    font-size: 3rem;
-    font-weight: 600;
-    letter-spacing: -0.04em;
-    line-height: 1;
-  }
-  .price-once {
-    font-family: var(--font-mono);
-    font-size: 0.82rem;
-    color: var(--text-tertiary);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  .fine-print {
-    margin-top: 18px;
-    font-size: 0.82rem;
-    color: var(--text-tertiary);
-    font-weight: 300;
-    max-width: 42ch;
-    margin-left: auto;
-    margin-right: auto;
-  }
-  .price-note { margin-top: 14px; font-size: 0.82rem; color: var(--text-tertiary); font-family: var(--font-mono); }
+  .price-note { margin-top: 16px; font-size: 0.82rem; color: var(--text-tertiary); font-family: var(--font-mono); }
 
   footer {
     border-top: 1px solid var(--border);
@@ -367,7 +331,6 @@
     color: var(--text-tertiary); font-size: 0.84rem; flex-wrap: wrap; gap: 12px;
   }
   footer .brand { font-size: 0.92rem; color: var(--text-secondary); }
-  footer .legal { display: flex; gap: 16px; flex-wrap: wrap; }
 
   @media (max-width: 860px) {
     .hero { padding-top: 40px; }
@@ -391,9 +354,9 @@
       <span class="links-inline" style="display:flex; gap:26px;">
         <a href="#notebook">Notebook</a>
         <a href="#how">How it works</a>
-        <a href="#get">Pricing</a>
+        <a href="https://github.com/WalrusQuant/plume#readme" target="_blank" rel="noopener">Docs</a>
       </span>
-      <a class="ghost buy js-buy" href="#get">Buy — $50</a>
+      <a class="ghost" href="#get">Get Plume</a>
     </div>
   </nav>
 
@@ -404,13 +367,12 @@
       <p class="sub">
         Write in markdown. Search your own notes on this machine. Connect
         Grok, Codex, Claude Code, or Cursor — they plan in the same files
-        you see in Plume. A Mac app. One payment.
+        you see in Plume.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary js-buy" href="#get">Buy Plume — $50 <span aria-hidden="true">→</span></a>
+        <a class="btn btn-primary" href="#get">Get Plume <span aria-hidden="true">→</span></a>
         <a class="btn btn-secondary" href="#notebook">See the workspace</a>
       </div>
-      <p class="price-note">macOS · Apple Silicon · one-time</p>
     </div>
     <div class="shot">
       <div class="window">
@@ -526,42 +488,18 @@
 
   <div id="get" class="closing">
     <h2>Your notebook, your machine</h2>
-    <div class="price"><span class="price-amt">$50</span><span class="price-once">one-time</span></div>
-    <p>
-      The Mac app, forever. Notes, sources, the search model, and the plans
-      your agent writes stay on disk. The assistant uses your API key —
-      Anthropic, OpenAI, Grok, OpenRouter, or a local endpoint. Tokens are
-      not included.
-    </p>
+    <p>Local-first and bring-your-own-key. Notes, sources, the search model, and the plans your agent writes stay on disk. No subscription.</p>
     <div class="cta-row">
-      <a class="btn btn-primary js-buy" href="#get">Buy Plume <span aria-hidden="true">→</span></a>
+      <a class="btn btn-primary" href="https://github.com/WalrusQuant/plume">View on GitHub <span aria-hidden="true">→</span></a>
     </div>
-    <p class="price-note">macOS, Apple Silicon · checkout via Polar</p>
-    <p class="fine-print">
-      Intel Mac, Windows, and Linux are not in this purchase.
-      Re-download future 1.x builds from your Polar purchases page.
-    </p>
+    <div class="price-note">Free &amp; open source · Anthropic, OpenAI, Grok, OpenRouter, or your own endpoint</div>
   </div>
 
   <footer>
     <div class="brand"><img class="mark" src="icon.png" width="24" height="24" alt="" style="width:24px;height:24px;border-radius:6px;" /> Plume</div>
-    <div class="legal">
-      <span>A local-first AI notebook. © 2026 Adam Wickwire</span>
-    </div>
+    <div>A local-first AI notebook. © 2026</div>
   </footer>
 </div>
-
-<script>
-  // Paste the Polar Checkout Link here. Until then, Buy scrolls to #get.
-  const POLAR_CHECKOUT = "";
-  if (POLAR_CHECKOUT) {
-    document.querySelectorAll(".js-buy").forEach((a) => {
-      a.href = POLAR_CHECKOUT;
-      a.target = "_blank";
-      a.rel = "noopener";
-    });
-  }
-</script>
 
 </body>
 </html>
